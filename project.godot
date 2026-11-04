@@ -1,0 +1,45 @@
+; Engine configuration file.
+; Godot 4.x (δοκιμασμένο σχεδιαστικά για 4.4+, προτείνεται η τελευταία σταθερή).
+
+config_version=5
+
+[application]
+
+config/name="Σταμάτα στο σωστό"
+config/description="Παιχνίδι δεξιότητας για περίπτερα εκδηλώσεων."
+run/main_scene="res://scenes/main.tscn"
+config/features=PackedStringArray("4.4", "GL Compatibility")
+config/icon="res://icon.svg"
+boot_splash/bg_color=Color(0.105882, 0.121569, 0.231373, 1)
+boot_splash/show_image=false
+
+[autoload]
+
+Config="*res://scripts/autoload/config.gd"
+
+[display]
+
+window/size/viewport_width=1920
+window/size/viewport_height=1080
+window/size/window_width_override=1280
+window/size/window_height_override=720
+window/stretch/mode="canvas_items"
+window/stretch/aspect="expand"
+window/handheld/orientation=4
+
+[gui]
+
+theme/custom_font="res://assets/fonts/DejaVuSans-Bold.ttf"
+
+[input_devices]
+
+pointing/emulate_mouse_from_touch=true
+pointing/emulate_touch_from_mouse=false
+
+[rendering]
+
+renderer/rendering_method="gl_compatibility"
+renderer/rendering_method.mobile="gl_compatibility"
+textures/canvas_textures/default_texture_filter=3
+textures/vram_compression/import_etc2_astc=true
+environment/defaults/default_clear_color=Color(0.105882, 0.121569, 0.231373, 1)
