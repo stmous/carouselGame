@@ -17,6 +17,9 @@ const Game = preload("res://scripts/game/game.gd")
 const PinPad = preload("res://scripts/admin/pin_pad.gd")
 const AdminScreen = preload("res://scripts/admin/admin_screen.gd")
 const Fonts = preload("res://scripts/util/fonts.gd")
+const Kiosk = preload("res://scripts/util/kiosk.gd")
+
+const CURSOR_HIDE_MS := 2500        # ο κέρσορας κρύβεται μετά από τόση ακινησία
 
 enum Screen { ATTRACT, GAME, PIN, ADMIN }
 
@@ -48,6 +51,7 @@ var _screen_tween: Tween
 var _corner_down_ms := -1
 var _test_mode := false             # δοκιμαστικό παιχνίδι από το admin
 var _font_id := ""
+var _last_mouse_move_ms := 0
 
 
 func _ready() -> void:
@@ -132,6 +136,7 @@ func _apply_config() -> void:
 		attract_icons.start(ATTRACT_ICON_SPEED)
 	if game.phase == Game.Phase.IDLE:
 		game.apply_config()
+	Kiosk.apply(get_tree(), cfg["kiosk"])
 	_update_debug_label()
 	_layout()
 
@@ -144,11 +149,16 @@ func _notification(what: int) -> void:
 		NOTIFICATION_APPLICATION_PAUSED:
 			# Android: η εφαρμογή πήγε στο παρασκήνιο ⇒ καθαρή επιστροφή στην οθόνη έλξης.
 			if screen == Screen.GAME:
-				game.abort()
+				_abort_game()
 				_show_attract(false)
 		NOTIFICATION_APPLICATION_RESUMED:
 			Sfx.resume_music()
 			PressInput.mark_activity()
+			Kiosk.apply(get_tree(), Config.data["kiosk"])
+		NOTIFICATION_WM_CLOSE_REQUEST:
+			# Με «Αποτροπή κλεισίματος» το Alt+F4 / X αγνοείται (έξοδος μόνο από τις ρυθμίσεις).
+			if get_tree().auto_accept_quit:
+				_abort_game()
 
 
 func _layout() -> void:
@@ -205,7 +215,27 @@ func _process(delta: float) -> void:
 		if Time.get_ticks_msec() - _corner_down_ms >= CORNER_HOLD_MS:
 			_corner_down_ms = -1
 			_open_pin()
+	_update_cursor()
 	_check_idle()
+
+
+## Κέρσορας: κρυφός στην οθόνη έλξης και στο παιχνίδι όταν το ποντίκι μένει
+## ακίνητο· πάντα ορατός στις ρυθμίσεις και στο PIN.
+func _update_cursor() -> void:
+	var hide_now := bool(Config.data["kiosk"]["hide_cursor"]) \
+		and (screen == Screen.ATTRACT or screen == Screen.GAME) \
+		and Time.get_ticks_msec() - _last_mouse_move_ms > CURSOR_HIDE_MS
+	var want := Input.MOUSE_MODE_HIDDEN if hide_now else Input.MOUSE_MODE_VISIBLE
+	if Input.mouse_mode != want:
+		Input.mouse_mode = want
+
+
+## Διακοπή του τρέχοντος παιχνιδιού. Αν έγινε τουλάχιστον μία προσπάθεια,
+## καταγράφεται στα στατιστικά (ως «διακόπηκε», εκτός αν είχε ήδη τελειώσει).
+func _abort_game() -> void:
+	if not _test_mode:
+		Stats.add(game.take_unrecorded())
+	game.abort()
 
 
 ## Idle timeout: χωρίς αλληλεπίδραση ⇒ επιστροφή στην οθόνη έλξης.
@@ -221,7 +251,7 @@ func _check_idle() -> void:
 		return
 	match screen:
 		Screen.GAME:
-			game.abort()
+			_abort_game()
 			if _test_mode:
 				_back_to_admin()
 			else:
@@ -236,9 +266,11 @@ func _check_idle() -> void:
 func _input(event: InputEvent) -> void:
 	if PressInput.is_activity(event):
 		PressInput.mark_activity()
+	if event is InputEventMouseMotion:
+		_last_mouse_move_ms = Time.get_ticks_msec()
 	if _is_admin_shortcut(event) and (screen == Screen.ATTRACT or (screen == Screen.GAME and not _test_mode)):
 		get_viewport().set_input_as_handled()
-		game.abort()
+		_abort_game()
 		_open_pin()
 		return
 	if screen == Screen.GAME and _test_mode and event is InputEventKey \
@@ -290,8 +322,10 @@ func _hide_attract() -> void:
 	attract_icons.request_stop(0.0)
 
 
-func _on_game_finished(_record: Dictionary) -> void:
-	# Φάση 4: εδώ θα καταγράφεται το `_record` στα στατιστικά (όχι τα δοκιμαστικά).
+func _on_game_finished(record: Dictionary) -> void:
+	# Τα δοκιμαστικά παιχνίδια (από τις ρυθμίσεις) δεν καταγράφονται.
+	if not _test_mode:
+		Stats.add(record)
 	if _test_mode:
 		_back_to_admin()
 		return
@@ -487,6 +521,9 @@ func _debug_keys(event: InputEvent) -> bool:
 			cfg["audio"]["master_mute"] = not bool(cfg["audio"]["master_mute"])
 		KEY_F8:
 			cfg["flow"]["attract_icons"] = not bool(cfg["flow"]["attract_icons"])
+		KEY_F11:
+			Kiosk.toggle_fullscreen()
+			return true
 		_:
 			return false
 	Config.save_config()

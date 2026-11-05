@@ -28,6 +28,7 @@ const COUNTDOWN_STEP := 0.8        # δευτερόλεπτα ανά αριθμ�
 
 var phase: int = Phase.IDLE
 var flow: GameFlow
+var _recorded := false             # αν το παιχνίδι έχει ήδη παραδοθεί για στατιστικά
 
 var circle_back: TargetCircle
 var carousel: CarouselView
@@ -137,6 +138,7 @@ func start_game(test_game: bool = false) -> void:
 	abort()
 	apply_config()
 	flow = GameFlow.new(Config.data, test_game, Time.get_datetime_string_from_system())
+	_recorded = false
 	if Config.icons().is_empty():
 		push_warning("Δεν υπάρχουν εικονίδια στη λίστα.")
 		_show_popup(null, "Δεν έχουν οριστεί εικονίδια.\nΆνοιξε τις ρυθμίσεις.", null)
@@ -315,7 +317,19 @@ func _on_popup_closed() -> void:
 		_finish()
 
 
+## Για παιχνίδι που διακόπτεται (idle, παύση, admin): η εγγραφή του για τα
+## στατιστικά, αν έχει γίνει τουλάχιστον μία προσπάθεια· αλλιώς {}.
+## Αν ο παίκτης είχε ήδη τελειώσει (π.χ. εγκατέλειψε στο τελικό popup), η
+## εγγραφή είναι κανονική (όχι «διακόπηκε»).
+func take_unrecorded() -> Dictionary:
+	if flow == null or _recorded or flow.is_test or flow.results.is_empty():
+		return {}
+	_recorded = true
+	return flow.record(not flow.finished)
+
+
 func _finish() -> void:
+	_recorded = true
 	phase = Phase.IDLE
 	_set_highlight(0.0, 0.3)
 	finished.emit(flow.record())

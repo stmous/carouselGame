@@ -14,6 +14,9 @@ const CfgPath = preload("res://scripts/core/cfg_path.gd")
 const MediaImport = preload("res://scripts/util/media_import.gd")
 const AssetLoader = preload("res://scripts/util/asset_loader.gd")
 const Fonts = preload("res://scripts/util/fonts.gd")
+const StatsCore = preload("res://scripts/core/stats_core.gd")
+const Profiles = preload("res://scripts/util/profiles.gd")
+const Exports = preload("res://scripts/util/exports.gd")
 
 signal closed(saved: bool)
 signal test_requested(draft: Dictionary)
@@ -26,6 +29,9 @@ const SECTIONS := [
 	["effects", "Εφέ"],
 	["sounds", "Ήχοι"],
 	["flow", "Οθόνη έλξης & ροή"],
+	["stats", "Στατιστικά"],
+	["profiles", "Προφίλ θεμάτων"],
+	["kiosk", "Kiosk"],
 	["system", "Σύστημα"],
 ]
 const SOUND_NAMES := {
@@ -48,6 +54,8 @@ var _preview: AdminPreview
 var _picker: FilePicker
 var _dirty_label: Label
 var _rebuild_pending := false
+var _stats_day := ""               # φίλτρο στατιστικών ("" = όλες οι ημέρες)
+var _stats_mode := ""              # φίλτρο στατιστικών ("" = όλες οι λειτουργίες)
 
 
 func _ready() -> void:
@@ -287,22 +295,25 @@ func _toggle(path: Array, rebuild: bool = false) -> Button:
 
 ## Επιλογή μίας τιμής από λίγες (κουμπιά δίπλα-δίπλα). `options`: [[τιμή, κείμενο], ...]
 func _segmented(path: Array, options: Array, rebuild: bool = false, on_change: Callable = Callable()) -> HBoxContainer:
+	if on_change.is_valid():
+		return _choice(options, _v(path), on_change)
+	return _choice(options, _v(path), func(value): _set_value(path, value, rebuild))
+
+
+## Το ίδιο, χωρίς σύνδεση με ρύθμιση: `on_pick(value)` στο πάτημα.
+func _choice(options: Array, current, on_pick: Callable) -> HBoxContainer:
 	var h := HBoxContainer.new()
 	h.add_theme_constant_override("separation", 6)
 	var group := ButtonGroup.new()
-	var current = _v(path)
 	for opt in options:
 		var b := UI.button(str(opt[1]), "SegButton")
 		b.toggle_mode = true
 		b.button_group = group
-		b.button_pressed = opt[0] == current
+		b.button_pressed = typeof(opt[0]) == typeof(current) and opt[0] == current \
+			or (typeof(opt[0]) in [TYPE_INT, TYPE_FLOAT] and typeof(current) in [TYPE_INT, TYPE_FLOAT] and opt[0] == current)
 		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		var value = opt[0]
-		b.pressed.connect(func():
-			if on_change.is_valid():
-				on_change.call(value)
-			else:
-				_set_value(path, value, rebuild))
+		b.pressed.connect(func(): on_pick.call(value))
 		h.add_child(b)
 	return h
 
@@ -454,6 +465,12 @@ func _show_section(id: String, keep_scroll: bool = false) -> void:
 			_build_sounds()
 		"flow":
 			_build_flow()
+		"stats":
+			_build_stats()
+		"profiles":
+			_build_profiles()
+		"kiosk":
+			_build_kiosk()
 		"system":
 			_build_system()
 	if keep_scroll:
@@ -825,9 +842,331 @@ func _build_system() -> void:
 	b.add_child(UI.help("Φάκελος δεδομένων: " + ProjectSettings.globalize_path("user://")))
 	b.add_child(UI.help("Έκδοση εφαρμογής: %s · σχήμα ρυθμίσεων: %d" % [
 		str(ProjectSettings.get_setting("application/config/version", "?")), ConfigSchema.SCHEMA_VERSION]))
+	b.add_child(UI.help("Η έξοδος από την εφαρμογή βρίσκεται στην ενότητα «Kiosk»."))
+
+
+# ------------------------------------------------------------ στατιστικά ---
+
+static func _fmt_day(day: String) -> String:
+	var p := day.split("-")
+	if p.size() != 3:
+		return day
+	return "%s/%s/%s" % [p[2], p[1], p[0]]
+
+
+func _build_stats() -> void:
+	var all: Array = Stats.records
+	var b := _add_card("Φίλτρα", "Τα δοκιμαστικά παιχνίδια από τις ρυθμίσεις δεν καταγράφονται.")
+	var days := StatsCore.days(all)
+	var opt := OptionButton.new()
+	opt.custom_minimum_size = Vector2(0, UI.ROW_H)
+	var ids: Array = [""]
+	opt.add_item("Όλες οι ημέρες (%d)" % all.size())
+	for d in days:
+		opt.add_item("%s (%d)" % [_fmt_day(d), StatsCore.count_on_day(all, d)])
+		ids.append(d)
+	if not ids.has(_stats_day):
+		_stats_day = ""
+	opt.select(ids.find(_stats_day))
+	opt.item_selected.connect(func(i: int):
+		_stats_day = ids[i]
+		_show_section("stats", true))
+	b.add_child(UI.row("Ημέρα", opt))
+	b.add_child(UI.row("Λειτουργία", _choice(
+		[["", "Όλες"], [ConfigSchema.MODE_ONE_CORRECT, "Ένα σωστό"], [ConfigSchema.MODE_WHEEL, "Τροχός"]],
+		_stats_mode, func(v):
+			_stats_mode = str(v)
+			_show_section("stats", true))))
+
+	var recs := StatsCore.filter(all, _stats_day, _stats_mode)
+	var sm := StatsCore.summarize(recs)
+
+	b = _add_card("Σύνολα")
+	var tiles := HBoxContainer.new()
+	b.add_child(tiles)
+	tiles.add_child(UI.tile("Παιχνίδια", str(sm["games"])))
+	if int(sm["oc_games"]) > 0:
+		tiles.add_child(UI.tile("Νίκες («Ένα σωστό»)", str(sm["wins"])))
+		tiles.add_child(UI.tile("Ποσοστό νικών", "%d%%" % int(round(float(sm["win_rate"]) * 100.0))))
+	if int(sm["abandoned"]) > 0:
+		tiles.add_child(UI.tile("Διακόπηκαν", str(sm["abandoned"])))
+	if _stats_mode == "":
+		b.add_child(UI.help("«Ένα σωστό»: %d παιχνίδια · «Τροχός της τύχης»: %d παιχνίδια" % [
+			sm["by_mode"]["one_correct"], sm["by_mode"]["wheel"]]))
+	if int(sm["abandoned"]) > 0:
+		b.add_child(UI.help("«Διακόπηκαν»: ο παίκτης έφυγε στη μέση (idle timeout ή διακοπή). Μετράνε ως μη νίκες."))
+
+	if int(sm["oc_games"]) > 0:
+		b = _add_card("«Ένα σωστό»: σε ποια προσπάθεια κέρδισαν")
+		var wpa: Array = sm["wins_per_attempt"]
+		var top := 1
+		for w in wpa:
+			top = maxi(top, int(w))
+		for i in wpa.size():
+			if i >= 1 and int(wpa[i]) == 0 and i >= int(Config.data["modes"][ConfigSchema.MODE_ONE_CORRECT]["attempts"]):
+				continue
+			b.add_child(_stat_row(null, "%s προσπάθεια" % ORDINALS[i], int(wpa[i]), top, "GoldBar"))
+		b.add_child(UI.help("Αστοχίες (εκτός ανοχής): %d" % int(sm["misses"])))
+
+	b = _add_card("Πόσες φορές βγήκε κάθε εικονίδιο",
+		"Μετράει κάθε προσπάθεια. Στον «Τροχό της τύχης» δείχνει πόσα δώρα μοιράστηκαν "
+		+ "(τα εικονίδια «Ξαναπαίξε» δεν είναι δώρα).")
+	var counts: Dictionary = sm["icon_counts"]
+	var names: Dictionary = sm["icon_names"]
+	var order: Array = []
+	for icon in Config.icons():
+		order.append(icon["id"])
+	for id in counts:
+		if not order.has(id):
+			order.append(id)
+	var top_count := 1
+	for id in counts:
+		top_count = maxi(top_count, int(counts[id]))
+	if order.is_empty():
+		b.add_child(UI.help("Δεν υπάρχουν εικονίδια."))
+	for id in order:
+		var icon := ConfigSchema.find_icon(Config.data, str(id))
+		var label_text := str(icon.get("name", names.get(id, id)))
+		if icon.is_empty():
+			label_text += " (διαγραμμένο)"
+		var tex: Texture2D = null
+		if not icon.is_empty():
+			tex = AssetLoader.texture(str(icon.get("image", "")))
+		b.add_child(_stat_row(tex, label_text, int(counts.get(id, 0)), top_count))
+
+	b = _add_card("Εξαγωγή & μηδενισμός")
+	var export_btn := UI.button("Εξαγωγή CSV (με τα τρέχοντα φίλτρα)", "AccentButton")
+	export_btn.disabled = recs.is_empty()
+	export_btn.pressed.connect(func():
+		var file_name := "stamata_stats_%s.csv" % Exports.stamp()
+		_export_bytes(file_name, StatsCore.to_csv(recs).to_utf8_buffer(), ["*.csv ; CSV"]))
+	b.add_child(export_btn)
+	b.add_child(UI.help("Το CSV ανοίγει απευθείας στο Excel με σωστά ελληνικά (UTF-8 με BOM, διαχωριστικό «;»)."))
+	var reset_btn := UI.button("Μηδενισμός στατιστικών", "DangerButton")
+	reset_btn.disabled = all.is_empty()
+	reset_btn.pressed.connect(func():
+		UI.modal(self, "Μηδενισμός στατιστικών",
+			"Θα διαγραφούν ΟΛΑ τα στατιστικά (%d παιχνίδια), όχι μόνο όσα φαίνονται με τα φίλτρα. "
+			% all.size() + "Η ενέργεια δεν αναιρείται. Αν τα χρειάζεσαι, κάνε πρώτα εξαγωγή CSV.",
+			[["Άκυρο", Callable(), ""], ["Διαγραφή όλων", _reset_stats, "DangerButton"]]))
+	b.add_child(reset_btn)
+
+
+func _reset_stats() -> void:
+	Stats.reset()
+	_show_section("stats")
+	UI.toast(self, "Τα στατιστικά μηδενίστηκαν.")
+
+
+func _stat_row(tex: Texture2D, caption: String, value: int, max_value: int, bar_variation: String = "") -> HBoxContainer:
+	var h := HBoxContainer.new()
+	if tex != null:
+		var t := TextureRect.new()
+		t.texture = tex
+		t.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		t.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+		t.custom_minimum_size = Vector2(48, 48)
+		h.add_child(t)
+	var l := UI.label(caption)
+	l.custom_minimum_size = Vector2(240, 0)
+	l.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	h.add_child(l)
+	h.add_child(UI.bar(value, max_value, bar_variation))
+	var n := UI.label(str(value))
+	n.autowrap_mode = TextServer.AUTOWRAP_OFF
+	n.custom_minimum_size = Vector2(80, 0)
+	n.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	n.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	h.add_child(n)
+	return h
+
+
+## Αποθήκευση αρχείου σε φάκελο του χρήστη (Έγγραφα/Λήψεις). Στο Android, αν
+## δεν επιτραπεί η απευθείας εγγραφή, ανοίγει ο διάλογος αποθήκευσης του συστήματος.
+func _export_bytes(file_name: String, bytes: PackedByteArray, filters: Array) -> void:
+	var path := Exports.write(file_name, bytes)
+	var internal := path == "" or path.begins_with(ProjectSettings.globalize_path("user://"))
+	if internal and OS.get_name() == "Android" and DisplayServer.has_feature(DisplayServer.FEATURE_NATIVE_DIALOG_FILE):
+		DisplayServer.file_dialog_show("Αποθήκευση", "", file_name, false, DisplayServer.FILE_DIALOG_MODE_SAVE_FILE,
+			PackedStringArray(filters), func(ok: bool, paths: PackedStringArray, _i: int):
+				if not ok or paths.is_empty():
+					return
+				var f := FileAccess.open(paths[0], FileAccess.WRITE)
+				if f == null:
+					_export_done.call_deferred("")
+					return
+				f.store_buffer(bytes)
+				f.close()
+				_export_done.call_deferred(paths[0]))
+		return
+	_export_done(path)
+
+
+func _export_done(path: String) -> void:
+	if path == "":
+		UI.modal(self, "Η εξαγωγή απέτυχε", "Δεν ήταν δυνατή η εγγραφή του αρχείου.", [["OK", Callable(), "AccentButton"]])
+	else:
+		UI.modal(self, "Η εξαγωγή ολοκληρώθηκε", "Το αρχείο αποθηκεύτηκε στο:\n\n" + path, [["OK", Callable(), "AccentButton"]])
+
+
+# --------------------------------------------------------- προφίλ θεμάτων ---
+
+func _build_profiles() -> void:
+	var b := _add_card("Αποθήκευση τρέχοντος θέματος ως προφίλ",
+		"Αποθηκεύει τις τρέχουσες ρυθμίσεις μαζί με τις εικόνες, τους ήχους και τις γραμματοσειρές τους "
+		+ "σε ένα αρχείο .zip. Το PIN και οι ρυθμίσεις kiosk δεν περιλαμβάνονται (αφορούν τη συσκευή).")
+	var name_edit := LineEdit.new()
+	name_edit.placeholder_text = "Όνομα (π.χ. Πελάτης Χ — Έκθεση 2026)"
+	name_edit.custom_minimum_size = Vector2(0, UI.ROW_H)
+	b.add_child(name_edit)
+	var save := UI.button("Αποθήκευση ως προφίλ", "AccentButton")
+	save.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
+	save.pressed.connect(func():
+		var n := name_edit.text.strip_edges()
+		if n == "":
+			UI.toast(self, "Γράψε ένα όνομα για το προφίλ.", UI.DANGER)
+			return
+		var path := Profiles.path_for(n)
+		if FileAccess.file_exists(path):
+			UI.modal(self, "Υπάρχει ήδη", "Υπάρχει προφίλ με αυτό το όνομα. Να αντικατασταθεί;",
+				[["Άκυρο", Callable(), ""], ["Αντικατάσταση", _save_profile.bind(n), "AccentButton"]])
+		else:
+			_save_profile(n))
+	b.add_child(save)
+
+	var profiles := Profiles.list()
+	b = _add_card("Αποθηκευμένα προφίλ (%d)" % profiles.size(),
+		"«Φόρτωση» βάζει το θέμα στις ρυθμίσεις· εφαρμόζεται στο παιχνίδι με «Αποθήκευση». "
+		+ "«Εξαγωγή» αντιγράφει το .zip στα Έγγραφα/Λήψεις, για μεταφορά σε άλλη συσκευή.")
+	if profiles.is_empty():
+		b.add_child(UI.help("Δεν υπάρχουν ακόμα αποθηκευμένα προφίλ."))
+	for p in profiles:
+		var row := HBoxContainer.new()
+		var info := UI.label(str(p["name"]))
+		info.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		info.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+		row.add_child(info)
+		var local_unix := int(p["modified"]) + int(Time.get_time_zone_from_system().get("bias", 0)) * 60
+		var when := UI.label(Time.get_datetime_string_from_unix_time(local_unix).replace("T", " ").substr(0, 16), "MutedLabel")
+		when.autowrap_mode = TextServer.AUTOWRAP_OFF
+		when.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+		row.add_child(when)
+		var path: String = p["path"]
+		var load_btn := UI.button("Φόρτωση", "", 130)
+		load_btn.pressed.connect(func(): _load_profile(path))
+		row.add_child(load_btn)
+		var exp_btn := UI.button("Εξαγωγή", "", 130)
+		exp_btn.pressed.connect(func(): _export_bytes(path.get_file(), FileAccess.get_file_as_bytes(path), ["*.zip ; Θέμα"]))
+		row.add_child(exp_btn)
+		var del := UI.button("×", "DangerButton", 64)
+		del.pressed.connect(func():
+			UI.modal(self, "Διαγραφή προφίλ", "Να διαγραφεί το προφίλ «%s»;" % path.get_file().get_basename(),
+				[["Άκυρο", Callable(), ""], ["Διαγραφή", _delete_profile.bind(path), "DangerButton"]]))
+		row.add_child(del)
+		b.add_child(row)
+
+	b = _add_card("Εισαγωγή θέματος από αρχείο",
+		"Για μεταφορά από άλλη συσκευή (π.χ. από PC σε tablet): αντίγραψε το .zip στη συσκευή "
+		+ "(USB, cloud, email) και διάλεξέ το εδώ.")
+	var imp := UI.button("Εισαγωγή από αρχείο .zip…")
+	imp.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
+	imp.pressed.connect(func(): _picker.pick("zip", _import_profile_file))
+	b.add_child(imp)
+
+	b = _add_card("Επαναφορά εργοστασιακών ρυθμίσεων",
+		"Επιστρέφει ΟΛΕΣ τις ρυθμίσεις στο demo θέμα (και το PIN στο 1234) και αποθηκεύει αμέσως. "
+		+ "Τα στατιστικά και τα αποθηκευμένα προφίλ δεν σβήνονται.")
+	var reset := UI.button("Επαναφορά εργοστασιακών ρυθμίσεων", "DangerButton")
+	reset.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
+	reset.pressed.connect(func():
+		UI.modal(self, "Επαναφορά εργοστασιακών ρυθμίσεων",
+			"Σίγουρα; Όλες οι ρυθμίσεις θα χαθούν (εκτός αν τις έχεις αποθηκεύσει ως προφίλ).",
+			[["Άκυρο", Callable(), ""], ["Επαναφορά", _factory_reset, "DangerButton"]]))
+	b.add_child(reset)
+
+
+func _delete_profile(path: String) -> void:
+	DirAccess.remove_absolute(path)
+	_show_section("profiles", true)
+
+
+func _save_profile(profile_name: String) -> void:
+	var err := Profiles.pack(ConfigSchema.sanitize(draft.duplicate(true)), Profiles.path_for(profile_name), profile_name)
+	if err != "":
+		UI.toast(self, err, UI.DANGER)
+		return
+	UI.toast(self, "Το προφίλ «%s» αποθηκεύτηκε." % profile_name)
+	_show_section("profiles", true)
+
+
+func _load_profile(path: String) -> bool:
+	var r := Profiles.unpack(path, draft)
+	if str(r.get("error", "")) != "":
+		UI.toast(self, str(r["error"]), UI.DANGER)
+		return false
+	draft = r["cfg"]
+	_changed(true)
+	var msg := "Φορτώθηκε το «%s». Πάτα «Αποθήκευση» για να εφαρμοστεί στο παιχνίδι." % str(r["name"])
+	if str(r.get("warning", "")) != "":
+		msg += "\n\n" + str(r["warning"])
+	UI.modal(self, "Φόρτωση θέματος", msg, [["OK", Callable(), "AccentButton"]])
+	return true
+
+
+func _import_profile_file(src: String) -> void:
+	var bytes := FileAccess.get_file_as_bytes(src)
+	if bytes.is_empty():
+		UI.toast(self, "Δεν ήταν δυνατή η ανάγνωση του αρχείου.", UI.DANGER)
+		return
+	var base := src.get_file().get_basename()
+	if base == "" or base.contains(":"):
+		base = "εισαγωγή_" + Exports.stamp()
+	var dest := Profiles.path_for(base)
+	DirAccess.make_dir_recursive_absolute(Profiles.DIR)
+	var f := FileAccess.open(dest, FileAccess.WRITE)
+	if f == null:
+		UI.toast(self, "Αποτυχία αντιγραφής του αρχείου.", UI.DANGER)
+		return
+	f.store_buffer(bytes)
+	f.close()
+	if not _load_profile(dest):
+		DirAccess.remove_absolute(dest)   # δεν ήταν έγκυρο θέμα
+		return
+	_show_section("profiles", true)
+
+
+func _factory_reset() -> void:
+	draft = ConfigSchema.defaults()
+	_do_save(false)
+	_preview.refresh(draft)
+	Sfx.preview_audio(draft["audio"])
+	_show_section(_section)
+	UI.toast(self, "Έγινε επαναφορά των εργοστασιακών ρυθμίσεων.")
+
+
+# ------------------------------------------------------------------ kiosk ---
+
+func _build_kiosk() -> void:
+	var k := ["kiosk"]
+	var b := _add_card("Kiosk (αυτή η συσκευή)",
+		"Ισχύουν μετά την αποθήκευση. Όταν η εφαρμογή τρέχει μέσα από τον editor του Godot, "
+		+ "η πλήρης οθόνη και η αποτροπή κλεισίματος δεν εφαρμόζονται (για άνετες δοκιμές).")
+	b.add_child(UI.row("Πλήρης οθόνη χωρίς πλαίσιο (Windows)", _toggle(k + ["fullscreen"])))
+	b.add_child(UI.row("Απόκρυψη κέρσορα (όταν το ποντίκι μένει ακίνητο)", _toggle(k + ["hide_cursor"])))
+	b.add_child(UI.row("Αποτροπή κλεισίματος (Alt+F4, κουμπί X, «Πίσω» στο Android)", _toggle(k + ["block_close"])))
+	b.add_child(UI.row("Οθόνη πάντα αναμμένη", _toggle(k + ["keep_screen_on"])))
+	b.add_child(UI.help("Το Esc δεν κλείνει ποτέ την εφαρμογή. Κάποια πράγματα δεν μπορεί να τα μπλοκάρει "
+		+ "καμία εφαρμογή (Ctrl+Alt+Del, πλήκτρο Windows, Alt+Tab, κουμπί Αρχικής στο Android). Για πλήρες "
+		+ "κλείδωμα δες στο README: Windows → Assigned Access / Shell Launcher, Android → Καρφίτσωμα εφαρμογής."))
+
+	b = _add_card("Έξοδος")
 	var quit := UI.button("Έξοδος από την εφαρμογή", "DangerButton")
 	quit.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
 	quit.pressed.connect(func():
 		UI.modal(self, "Έξοδος", "Να κλείσει η εφαρμογή; Μη αποθηκευμένες αλλαγές θα χαθούν.",
-			[["Άκυρο", Callable(), ""], ["Έξοδος", func(): get_tree().quit(), "DangerButton"]]))
+			[["Άκυρο", Callable(), ""], ["Έξοδος", _quit_app, "DangerButton"]]))
 	b.add_child(quit)
+
+
+func _quit_app() -> void:
+	get_tree().quit()

@@ -130,7 +130,7 @@ static func defaults() -> Dictionary:
 			"lose": {"file": "", "volume": 0.8, "enabled": true},
 		},
 		"admin": {"pin": "1234"},
-		"kiosk": {"fullscreen": true, "hide_cursor": true, "keep_screen_on": true},
+		"kiosk": {"fullscreen": true, "hide_cursor": true, "keep_screen_on": true, "block_close": true},
 	}
 
 

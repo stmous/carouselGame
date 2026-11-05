@@ -110,13 +110,15 @@ func retry_message() -> String:
 	return "Ευκαιρία %d!" % (attempt + 1)
 
 
-## Εγγραφή για τα στατιστικά.
-func record() -> Dictionary:
+## Εγγραφή για τα στατιστικά. `abandoned`: το παιχνίδι διακόπηκε πριν τελειώσει
+## (idle timeout, παύση εφαρμογής κ.λπ.) — μετράει ως μη νίκη.
+func record(abandoned: bool = false) -> Dictionary:
 	return {
 		"time": started_at,
 		"mode": mode,
 		"results": results.duplicate(),
 		"won": won,
 		"win_attempt": win_attempt,
+		"abandoned": abandoned,
 		"test": is_test,
 	}

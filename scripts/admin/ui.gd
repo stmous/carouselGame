@@ -136,6 +136,15 @@ static func theme() -> Theme:
 	t.set_stylebox("grabber_pressed", "VScrollBar", _box(BLUE, 8, 8, 8))
 	t.set_stylebox("scroll", "VScrollBar", _box(Color(0, 0, 0, 0.15), 8, 8, 8))
 
+	t.set_stylebox("background", "ProgressBar", _box(FIELD, 8, 0, 0))
+	t.set_stylebox("fill", "ProgressBar", _box(BLUE, 8, 0, 0))
+	t.set_type_variation("GoldBar", "ProgressBar")
+	t.set_stylebox("fill", "GoldBar", _box(ACCENT, 8, 0, 0))
+	t.set_type_variation("BigNumber", "Label")
+	t.set_font_size("font_size", "BigNumber", 52)
+	t.set_font("font", "BigNumber", bold)
+	t.set_color("font_color", "BigNumber", ACCENT)
+
 	t.set_constant("separation", "VBoxContainer", 12)
 	t.set_constant("separation", "HBoxContainer", 12)
 	_theme = t
@@ -252,3 +261,36 @@ static func toast(parent: Control, text: String, color: Color = SUCCESS) -> void
 	tw.tween_interval(2.6)
 	tw.tween_property(p, "modulate:a", 0.0, 0.4)
 	tw.tween_callback(p.queue_free)
+
+
+## Οριζόντια μπάρα τιμής (π.χ. στατιστικά).
+static func bar(value: float, max_value: float, variation: String = "") -> ProgressBar:
+	var p := ProgressBar.new()
+	p.min_value = 0
+	p.max_value = maxf(max_value, 1.0)
+	p.value = value
+	p.show_percentage = false
+	p.custom_minimum_size = Vector2(120, 26)
+	p.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	p.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	if variation != "":
+		p.theme_type_variation = variation
+	return p
+
+
+## «Πλακίδιο» με μεγάλο αριθμό και ετικέτα.
+static func tile(caption: String, value: String) -> PanelContainer:
+	var p := PanelContainer.new()
+	p.add_theme_stylebox_override("panel", _box(FIELD, 14, 22, 14))
+	p.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	var v := VBoxContainer.new()
+	v.add_theme_constant_override("separation", 2)
+	p.add_child(v)
+	var n := label(value, "BigNumber")
+	n.autowrap_mode = TextServer.AUTOWRAP_OFF
+	n.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	v.add_child(n)
+	var c := label(caption, "MutedLabel")
+	c.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	v.add_child(c)
+	return p
