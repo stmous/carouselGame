@@ -55,6 +55,24 @@ func configure(icon_list: Array, icons_settings: Dictionary, strip_settings: Dic
 	queue_redraw()
 
 
+## Αλλάζει μέγεθος/απόσταση/λωρίδα/σκιά χωρίς να ξαναχτίσει τη σειρά
+## (ζωντανή προεπισκόπηση: η κίνηση συνεχίζει ομαλά).
+func update_style(icons_settings: Dictionary, strip_settings: Dictionary) -> void:
+	icon_cfg = icons_settings
+	strip_cfg = strip_settings
+	shadow_enabled = bool(icon_cfg.get("shadow", true))
+	_update_span()
+	set_speed(speed_sw)
+	queue_redraw()
+
+
+## Αλλάζει την ταχύτητα χωρίς να σταματήσει την κίνηση.
+func set_speed(speed_screen_widths: float) -> void:
+	speed_sw = speed_screen_widths
+	if model != null and model.state == CarouselModel.State.RUNNING:
+		model.speed = _speed_u()
+
+
 func icon_size_px() -> float:
 	return float(icon_cfg.get("size_pct", 18.0)) / 100.0 * size.y
 

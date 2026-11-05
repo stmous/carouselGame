@@ -20,6 +20,7 @@ var _music: AudioStreamPlayer
 var _music_path := ""
 var _pool: Array = []
 var _next := 0
+var _override := {}             # ρυθμίσεις ήχου του admin (πρόχειρο), για ζωντανή ακρόαση
 
 
 func _ready() -> void:
@@ -35,12 +36,28 @@ func _ready() -> void:
 	_apply_config()
 
 
+func _audio() -> Dictionary:
+	return _override if not _override.is_empty() else Config.data["audio"]
+
+
 func _cfg(key: String) -> Dictionary:
-	return Config.data["audio"][key]
+	return _audio()[key]
 
 
 func _muted() -> bool:
-	return bool(Config.data["audio"]["master_mute"])
+	return bool(_audio()["master_mute"])
+
+
+## Το admin δίνει τις (μη αποθηκευμένες) ρυθμίσεις ήχου για να ακουστούν αμέσως.
+func preview_audio(audio_cfg: Dictionary) -> void:
+	_override = audio_cfg
+	_apply_config()
+
+
+## Επιστροφή στις αποθηκευμένες ρυθμίσεις.
+func clear_preview() -> void:
+	_override = {}
+	_apply_config()
 
 
 ## Διαδρομή αρχείου για έναν ήχο (το αρχείο του διαχειριστή ή το προεπιλεγμένο).
@@ -107,6 +124,13 @@ func _play_stream(stream: AudioStream, volume: float, pitch: float) -> void:
 	p.volume_db = linear_to_db(maxf(volume, 0.0001))
 	p.pitch_scale = pitch
 	p.play()
+
+
+## Δοκιμαστική αναπαραγωγή από την οθόνη ρυθμίσεων (αγνοεί mute/on-off).
+## `file` κενό ⇒ ο ενσωματωμένος ήχος του `key`.
+func preview(key: String, file: String, volume: float) -> void:
+	var path := file if file != "" else str(DEFAULT_SOUNDS.get(key, ""))
+	_play_stream(AssetLoader.sound(path), volume, 1.0)
 
 
 func stop_all_effects() -> void:

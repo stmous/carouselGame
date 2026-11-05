@@ -3,6 +3,9 @@
 ## Οθόνη έλξης: λογότυπο, κινούμενο μήνυμα «Πάτα για να παίξεις» και
 ## εικονίδια που περνούν αργά στο φόντο. Space / κλικ / άγγιγμα ξεκινά.
 ## Idle timeout: χωρίς αλληλεπίδραση για Ν δευτερόλεπτα ⇒ επιστροφή εδώ.
+##
+## Ρυθμίσεις: πάτημα 3 δ. στην πάνω αριστερή γωνία της οθόνης έλξης ή
+## Ctrl+Shift+A ⇒ PIN ⇒ οθόνη ρυθμίσεων.
 extends Control
 
 const PressInput = preload("res://scripts/util/press_input.gd")
@@ -11,8 +14,15 @@ const AssetLoader = preload("res://scripts/util/asset_loader.gd")
 const Backdrop = preload("res://scripts/game/backdrop.gd")
 const CarouselView = preload("res://scripts/game/carousel_view.gd")
 const Game = preload("res://scripts/game/game.gd")
+const PinPad = preload("res://scripts/admin/pin_pad.gd")
+const AdminScreen = preload("res://scripts/admin/admin_screen.gd")
+const Fonts = preload("res://scripts/util/fonts.gd")
 
-enum Screen { ATTRACT, GAME }
+enum Screen { ATTRACT, GAME, PIN, ADMIN }
+
+const CORNER_FRAC := 0.12           # μέγεθος κρυφής γωνίας (κλάσμα του ύψους)
+const CORNER_HOLD_MS := 3000
+const ADMIN_MIN_IDLE := 120.0       # το admin κλείνει μόνο του μετά από τουλάχιστον 2 λεπτά
 
 const ATTRACT_ICON_SPEED := 0.05    # πλάτη οθόνης / δ — αργά, διακριτικά
 const ATTRACT_ICON_OPACITY := 0.28
@@ -27,10 +37,16 @@ var logo: TextureRect
 var attract_label: Label
 var debug_label: Label
 var game: Game
+var admin: AdminScreen
+var pin_pad: PinPad
+var corner_indicator: Control
 
 var _time := 0.0
 var _input_block_until := 0
 var _screen_tween: Tween
+var _corner_down_ms := -1
+var _test_mode := false             # δοκιμαστικό παιχνίδι από το admin
+var _font_id := ""
 
 
 func _ready() -> void:
@@ -67,6 +83,12 @@ func _ready() -> void:
 	add_child(game)
 	game.finished.connect(_on_game_finished)
 
+	corner_indicator = Control.new()
+	corner_indicator.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	corner_indicator.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	corner_indicator.draw.connect(_draw_corner_indicator)
+	add_child(corner_indicator)
+
 	Config.changed.connect(_apply_config)
 	_apply_config()
 	_show_attract(false)
@@ -83,6 +105,11 @@ func _make_label() -> Label:
 
 func _apply_config() -> void:
 	var cfg: Dictionary = Config.data
+	# Γραμματοσειρά παιχνιδιού (το admin έχει δική του, πάντα ευανάγνωστη).
+	var fid := str(cfg["theme"]["font"])
+	if fid != _font_id:
+		_font_id = fid
+		get_tree().root.theme = Fonts.theme_for(fid)
 	backdrop.configure(cfg["theme"]["background"])
 	attract_label.text = str(cfg["flow"]["attract_text"])
 	logo.texture = AssetLoader.texture(str(cfg["theme"]["logo"]["image"]))
@@ -159,27 +186,60 @@ func _process(delta: float) -> void:
 		attract_label.modulate.a = 0.8 + 0.2 * sin(_time * TAU * 0.8)
 		# Το λογότυπο «αιωρείται» ελαφρά.
 		logo.rotation = deg_to_rad(1.2 * sin(_time * 0.9))
+	if _corner_down_ms >= 0:
+		corner_indicator.queue_redraw()
+		if Time.get_ticks_msec() - _corner_down_ms >= CORNER_HOLD_MS:
+			_corner_down_ms = -1
+			_open_pin()
 	_check_idle()
 
 
 ## Idle timeout: χωρίς αλληλεπίδραση ⇒ επιστροφή στην οθόνη έλξης.
 func _check_idle() -> void:
-	if screen != Screen.GAME:
+	if screen == Screen.ATTRACT:
 		return
 	var timeout := float(Config.data["flow"]["idle_timeout"])
 	if timeout <= 0.0:
 		return
-	if Time.get_ticks_msec() - PressInput.last_activity_ms > int(timeout * 1000.0):
-		game.abort()
-		_show_attract()
+	if screen == Screen.PIN or screen == Screen.ADMIN:
+		timeout = maxf(timeout, ADMIN_MIN_IDLE)
+	if Time.get_ticks_msec() - PressInput.last_activity_ms <= int(timeout * 1000.0):
+		return
+	match screen:
+		Screen.GAME:
+			game.abort()
+			if _test_mode:
+				_back_to_admin()
+			else:
+				_show_attract()
+		Screen.PIN:
+			_close_pin()
+		Screen.ADMIN:
+			# Ξεχασμένο ανοιχτό admin: κλείνει χωρίς αποθήκευση (ασφάλεια kiosk).
+			admin._finish(false)
 
 
 func _input(event: InputEvent) -> void:
 	if PressInput.is_activity(event):
 		PressInput.mark_activity()
+	if _is_admin_shortcut(event) and (screen == Screen.ATTRACT or (screen == Screen.GAME and not _test_mode)):
+		get_viewport().set_input_as_handled()
+		game.abort()
+		_open_pin()
+		return
+	if screen == Screen.GAME and _test_mode and event is InputEventKey \
+			and (event as InputEventKey).pressed and (event as InputEventKey).keycode == KEY_ESCAPE:
+		get_viewport().set_input_as_handled()
+		game.abort()
+		_back_to_admin()
+		return
+	if screen == Screen.ADMIN or screen == Screen.PIN:
+		return
 	if OS.is_debug_build() and _debug_keys(event):
 		return
 	if screen != Screen.ATTRACT:
+		return
+	if _handle_corner(event):
 		return
 	if Time.get_ticks_msec() < _input_block_until:
 		if PressInput.is_press(event):
@@ -211,8 +271,137 @@ func _hide_attract() -> void:
 
 
 func _on_game_finished(_record: Dictionary) -> void:
-	# Φάση 4: εδώ θα καταγράφεται το `_record` στα στατιστικά.
+	# Φάση 4: εδώ θα καταγράφεται το `_record` στα στατιστικά (όχι τα δοκιμαστικά).
+	if _test_mode:
+		_back_to_admin()
+		return
 	_show_attract()
+
+
+# ----------------------------------------------------- πρόσβαση στο admin ---
+
+static func _is_admin_shortcut(event: InputEvent) -> bool:
+	if not (event is InputEventKey):
+		return false
+	var k := event as InputEventKey
+	return k.pressed and not k.echo and k.ctrl_pressed and k.shift_pressed and k.keycode == KEY_A
+
+
+func _in_corner(pos: Vector2) -> bool:
+	var c := size.y * CORNER_FRAC
+	return pos.x <= c and pos.y <= c
+
+
+## Παρατεταμένο πάτημα στην πάνω αριστερή γωνία. Πατήματα στη γωνία δεν
+## ξεκινούν παιχνίδι. Επιστρέφει true αν το event αφορούσε τη γωνία.
+func _handle_corner(event: InputEvent) -> bool:
+	var pressed := false
+	var released := false
+	var pos := Vector2(-1, -1)
+	if event is InputEventMouseButton and (event as InputEventMouseButton).button_index == MOUSE_BUTTON_LEFT:
+		pressed = (event as InputEventMouseButton).pressed
+		released = not pressed
+		pos = (event as InputEventMouseButton).position
+	elif event is InputEventScreenTouch:
+		pressed = (event as InputEventScreenTouch).pressed
+		released = not pressed
+		pos = (event as InputEventScreenTouch).position
+	else:
+		return false
+	if released:
+		if _corner_down_ms >= 0:
+			_corner_down_ms = -1
+			corner_indicator.queue_redraw()
+		return false
+	if pressed and _in_corner(pos):
+		if _corner_down_ms < 0:
+			_corner_down_ms = Time.get_ticks_msec()
+		get_viewport().set_input_as_handled()
+		return true
+	return false
+
+
+## Διακριτικός δακτύλιος προόδου όσο κρατιέται πατημένη η γωνία.
+func _draw_corner_indicator() -> void:
+	if _corner_down_ms < 0:
+		return
+	var t := float(Time.get_ticks_msec() - _corner_down_ms) / CORNER_HOLD_MS
+	if t < 0.15:
+		return
+	var c := Vector2.ONE * size.y * CORNER_FRAC * 0.5
+	var r := size.y * CORNER_FRAC * 0.3
+	corner_indicator.draw_arc(c, r, 0.0, TAU, 48, Color(1, 1, 1, 0.15), 6.0, true)
+	corner_indicator.draw_arc(c, r, -PI / 2, -PI / 2 + TAU * clampf(t, 0.0, 1.0), 48, Color(1, 1, 1, 0.6), 6.0, true)
+
+
+func _open_pin() -> void:
+	if pin_pad != null:
+		return
+	screen = Screen.PIN
+	PressInput.mark_activity()
+	attract_icons.request_stop(0.0)
+	pin_pad = PinPad.new()
+	add_child(pin_pad)
+	pin_pad.accepted.connect(_on_pin_accepted)
+	pin_pad.cancelled.connect(_close_pin)
+
+
+func _close_pin() -> void:
+	if pin_pad != null:
+		pin_pad.queue_free()
+		pin_pad = null
+	_show_attract()
+
+
+func _on_pin_accepted() -> void:
+	if pin_pad != null:
+		pin_pad.queue_free()
+		pin_pad = null
+	_open_admin(false)
+
+
+func _open_admin(keep_draft: bool) -> void:
+	screen = Screen.ADMIN
+	PressInput.mark_activity()
+	game.visible = false
+	attract.visible = false
+	attract_icons.request_stop(0.0)
+	if admin == null:
+		admin = AdminScreen.new()
+		add_child(admin)
+		admin.closed.connect(_on_admin_closed)
+		admin.test_requested.connect(_on_admin_test)
+	admin.visible = true
+	admin.open(keep_draft)
+
+
+func _on_admin_closed(saved: bool) -> void:
+	admin.visible = false
+	_test_mode = false
+	if not saved:
+		# Επαναφορά: αναιρεί και ό,τι εφαρμόστηκε προσωρινά για δοκιμαστικό παιχνίδι.
+		Config.load_config()
+	_show_attract()
+
+
+## Δοκιμαστικό παιχνίδι με τις μη αποθηκευμένες ρυθμίσεις.
+func _on_admin_test(draft: Dictionary) -> void:
+	admin.visible = false
+	_test_mode = true
+	Config.apply(draft)
+	screen = Screen.GAME
+	PressInput.mark_activity()
+	_kill_screen_tween()
+	attract.visible = false
+	game.visible = true
+	game.modulate.a = 1.0
+	game.start_game(true)
+
+
+func _back_to_admin() -> void:
+	_test_mode = false
+	game.visible = false
+	_open_admin(true)
 
 
 func _show_attract(animated: bool = true) -> void:
