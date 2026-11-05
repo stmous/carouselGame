@@ -823,7 +823,8 @@ func _build_system() -> void:
 
 	b = _add_card("Εφαρμογή")
 	b.add_child(UI.help("Φάκελος δεδομένων: " + ProjectSettings.globalize_path("user://")))
-	b.add_child(UI.help("Έκδοση σχήματος ρυθμίσεων: %d" % ConfigSchema.SCHEMA_VERSION))
+	b.add_child(UI.help("Έκδοση εφαρμογής: %s · σχήμα ρυθμίσεων: %d" % [
+		str(ProjectSettings.get_setting("application/config/version", "?")), ConfigSchema.SCHEMA_VERSION]))
 	var quit := UI.button("Έξοδος από την εφαρμογή", "DangerButton")
 	quit.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
 	quit.pressed.connect(func():

@@ -40,6 +40,7 @@ var game: Game
 var admin: AdminScreen
 var pin_pad: PinPad
 var corner_indicator: Control
+var corner_hotspot: Control
 
 var _time := 0.0
 var _input_block_until := 0
@@ -88,6 +89,15 @@ func _ready() -> void:
 	corner_indicator.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	corner_indicator.draw.connect(_draw_corner_indicator)
 	add_child(corner_indicator)
+
+	# Αόρατη «ζώνη» στην πάνω αριστερή γωνία. Ως Control με MOUSE_FILTER_STOP
+	# «καταπίνει» το κλικ/άγγιγμα μέσω του GUI του Godot, οπότε δεν φτάνει ποτέ
+	# στο _unhandled_input που ξεκινά το παιχνίδι.
+	corner_hotspot = Control.new()
+	corner_hotspot.mouse_filter = Control.MOUSE_FILTER_STOP
+	corner_hotspot.gui_input.connect(_on_corner_gui_input)
+	corner_hotspot.mouse_exited.connect(_cancel_corner)
+	add_child(corner_hotspot)
 
 	Config.changed.connect(_apply_config)
 	_apply_config()
@@ -170,6 +180,10 @@ func _layout() -> void:
 	attract_label.position = Vector2(s.x * 0.05, label_cy - attract_label.size.y * 0.5)
 	attract_label.pivot_offset = attract_label.size * 0.5
 
+	var cs := s.y * CORNER_FRAC
+	corner_hotspot.position = Vector2.ZERO
+	corner_hotspot.size = Vector2(cs, cs)
+
 	var ds := int(s.y * 0.022)
 	debug_label.add_theme_font_size_override("font_size", ds)
 	debug_label.add_theme_color_override("font_color", Color(1, 1, 1, 0.55))
@@ -237,9 +251,15 @@ func _input(event: InputEvent) -> void:
 		return
 	if OS.is_debug_build() and _debug_keys(event):
 		return
+
+
+## Η οθόνη έλξης ξεκινά παιχνίδι μόνο με πατήματα που ΔΕΝ «έπιασε» κάποιο
+## στοιχείο του GUI (π.χ. η κρυφή γωνία των ρυθμίσεων).
+func _unhandled_input(event: InputEvent) -> void:
 	if screen != Screen.ATTRACT:
 		return
-	if _handle_corner(event):
+	# Σε αφή ακολουθεί πάντα εξομοιωμένο κλικ (που περνά από το GUI)· χρησιμοποιούμε εκείνο.
+	if event is InputEventScreenTouch:
 		return
 	if Time.get_ticks_msec() < _input_block_until:
 		if PressInput.is_press(event):
@@ -284,41 +304,29 @@ static func _is_admin_shortcut(event: InputEvent) -> bool:
 	if not (event is InputEventKey):
 		return false
 	var k := event as InputEventKey
-	return k.pressed and not k.echo and k.ctrl_pressed and k.shift_pressed and k.keycode == KEY_A
+	# physical_keycode: δουλεύει και με ελληνική διάταξη πληκτρολογίου (όπου το
+	# πλήκτρο A δίνει «α» και το keycode δεν είναι KEY_A).
+	return k.pressed and not k.echo and k.ctrl_pressed and k.shift_pressed \
+		and (k.physical_keycode == KEY_A or k.keycode == KEY_A)
 
 
-func _in_corner(pos: Vector2) -> bool:
-	var c := size.y * CORNER_FRAC
-	return pos.x <= c and pos.y <= c
-
-
-## Παρατεταμένο πάτημα στην πάνω αριστερή γωνία. Πατήματα στη γωνία δεν
-## ξεκινούν παιχνίδι. Επιστρέφει true αν το event αφορούσε τη γωνία.
-func _handle_corner(event: InputEvent) -> bool:
-	var pressed := false
-	var released := false
-	var pos := Vector2(-1, -1)
+## Κλικ/άγγιγμα στην κρυφή γωνία: ξεκινά τη χρονομέτρηση· άφημα την ακυρώνει.
+func _on_corner_gui_input(event: InputEvent) -> void:
 	if event is InputEventMouseButton and (event as InputEventMouseButton).button_index == MOUSE_BUTTON_LEFT:
-		pressed = (event as InputEventMouseButton).pressed
-		released = not pressed
-		pos = (event as InputEventMouseButton).position
-	elif event is InputEventScreenTouch:
-		pressed = (event as InputEventScreenTouch).pressed
-		released = not pressed
-		pos = (event as InputEventScreenTouch).position
-	else:
-		return false
-	if released:
-		if _corner_down_ms >= 0:
-			_corner_down_ms = -1
-			corner_indicator.queue_redraw()
-		return false
-	if pressed and _in_corner(pos):
-		if _corner_down_ms < 0:
-			_corner_down_ms = Time.get_ticks_msec()
-		get_viewport().set_input_as_handled()
-		return true
-	return false
+		corner_hotspot.accept_event()
+		if screen != Screen.ATTRACT:
+			return
+		if (event as InputEventMouseButton).pressed:
+			if _corner_down_ms < 0:
+				_corner_down_ms = Time.get_ticks_msec()
+		else:
+			_cancel_corner()
+
+
+func _cancel_corner() -> void:
+	if _corner_down_ms >= 0:
+		_corner_down_ms = -1
+		corner_indicator.queue_redraw()
 
 
 ## Διακριτικός δακτύλιος προόδου όσο κρατιέται πατημένη η γωνία.
@@ -439,7 +447,8 @@ func _update_debug_label() -> void:
 		return
 	var cfg: Dictionary = Config.data
 	var mode_name := "Ένα σωστό" if cfg["mode"] == ConfigSchema.MODE_ONE_CORRECT else "Τροχός της τύχης"
-	debug_label.text = "%s · σταμάτημα: %s · εφέ: %s · αντ. μέτρηση: %s · ήχος: %s    [F2–F8]" % [
+	debug_label.text = "v%s · %s · σταμάτημα: %s · εφέ: %s · αντ. μέτρηση: %s · ήχος: %s    [F2–F8]" % [
+		str(ProjectSettings.get_setting("application/config/version", "?")),
 		mode_name,
 		"επιβράδυνση" if cfg["stop"]["mode"] == "ease" else "άμεσο",
 		cfg["effects"]["preset"],
