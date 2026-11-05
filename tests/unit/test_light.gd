@@ -10,6 +10,7 @@ const GameFlow = preload("res://scripts/core/game_flow.gd")
 const Profiles = preload("res://scripts/util/profiles.gd")
 const ShellyMock = preload("res://tests/support/shelly_mock.gd")
 const Game = preload("res://scripts/game/game.gd")
+const LightAccess = preload("res://scripts/util/light_access.gd")
 
 
 # ------------------------------------------------------------ εντολές ---
@@ -264,7 +265,7 @@ func test_async_invalid_address_makes_no_request() -> void:
 
 func test_async_game_never_waits_for_shelly() -> void:
 	var root := tree().root
-	if not (root.has_node("Config") and root.has_node("Light") and root.has_node("Sfx")):
+	if not (root.has_node("Config") and root.has_node("Sfx")):
 		assert_true(true, "παραλείπεται χωρίς autoloads (τρέξε από το run_tests.tscn)")
 		finish()
 		return
@@ -273,7 +274,7 @@ func test_async_game_never_waits_for_shelly() -> void:
 		return
 	_mock.silent = true                       # το Shelly «κρεμάει» χωρίς απάντηση
 	var config_node := root.get_node("Config")
-	var light_node := root.get_node("Light")
+	var light_node := LightAccess.service(tree())
 	var backup: Dictionary = config_node.data.duplicate(true)
 	var cfg := ConfigSchema.defaults()
 	cfg["mode"] = ConfigSchema.MODE_ONE_CORRECT

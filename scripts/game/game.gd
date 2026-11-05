@@ -14,6 +14,7 @@ const TargetCircle = preload("res://scripts/game/target_circle.gd")
 const CarouselView = preload("res://scripts/game/carousel_view.gd")
 const ResultPopup = preload("res://scripts/game/result_popup.gd")
 const Confetti = preload("res://scripts/game/confetti.gd")
+const LightAccess = preload("res://scripts/util/light_access.gd")
 
 signal finished(record: Dictionary)
 signal stop_pressed
@@ -300,7 +301,9 @@ func _show_result() -> void:
 			Sfx.play("win")
 		_celebrate()
 	# Εξωτερικό φως (αν είναι ενεργό): ασύγχρονα, ταυτόχρονα με το popup.
-	Light.on_result(_pending_outcome, _pending_icon)
+	var light := LightAccess.service(get_tree())
+	if light != null:
+		light.on_result(_pending_outcome, _pending_icon)
 	result_shown.emit(_pending_outcome, _pending_icon)
 
 

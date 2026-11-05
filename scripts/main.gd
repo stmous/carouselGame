@@ -18,6 +18,7 @@ const PinPad = preload("res://scripts/admin/pin_pad.gd")
 const AdminScreen = preload("res://scripts/admin/admin_screen.gd")
 const Fonts = preload("res://scripts/util/fonts.gd")
 const Kiosk = preload("res://scripts/util/kiosk.gd")
+const LightAccess = preload("res://scripts/util/light_access.gd")
 
 const CURSOR_HIDE_MS := 2500        # ο κέρσορας κρύβεται μετά από τόση ακινησία
 
@@ -106,7 +107,14 @@ func _ready() -> void:
 
 	Config.changed.connect(_apply_config)
 	_apply_config()
+	# Εξωτερικό φως: εξασφαλίζει ότι η υπηρεσία υπάρχει (και στέλνει το «σβήσιμο»
+	# της εκκίνησης) ακόμα κι αν λείπει το autoload από το project.godot.
+	_ensure_light.call_deferred()
 	_show_attract(false)
+
+
+func _ensure_light() -> void:
+	LightAccess.service(get_tree())
 
 
 func _make_label() -> Label:

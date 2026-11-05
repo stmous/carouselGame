@@ -18,6 +18,7 @@ const StatsCore = preload("res://scripts/core/stats_core.gd")
 const Profiles = preload("res://scripts/util/profiles.gd")
 const Exports = preload("res://scripts/util/exports.gd")
 const ShellyRpc = preload("res://scripts/core/shelly_rpc.gd")
+const LightAccess = preload("res://scripts/util/light_access.gd")
 
 signal closed(saved: bool)
 signal test_requested(draft: Dictionary)
@@ -1272,7 +1273,11 @@ func _poll_light_status() -> void:
 	if _light_status_pending:
 		return
 	_light_status_pending = true
-	Light.check_status(draft["light"].duplicate(), _on_light_status)
+	var light := LightAccess.service(get_tree())
+	if light == null:
+		_light_status_pending = false
+		return
+	light.check_status(draft["light"].duplicate(), _on_light_status)
 
 
 func _on_light_status(ok: bool, code: int, body: String) -> void:
@@ -1291,7 +1296,9 @@ func _on_light_status(ok: bool, code: int, body: String) -> void:
 
 func _on_light_test() -> void:
 	UI.toast(self, "Στάλθηκε εντολή ανάμματος για %d δ…" % int(draft["light"]["duration"]), UI.MUTED)
-	Light.turn_on(draft["light"].duplicate(), _on_light_test_done)
+	var light := LightAccess.service(get_tree())
+	if light != null:
+		light.turn_on(draft["light"].duplicate(), _on_light_test_done)
 
 
 func _on_light_test_done(ok: bool, code: int, _body: String) -> void:
