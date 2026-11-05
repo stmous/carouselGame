@@ -11,7 +11,8 @@ const TestSuite = preload("res://tests/test_suite.gd")
 
 func _initialize() -> void:
 	var lines: Array = []
-	var r := TestSuite.run(lines)
+	var suite := TestSuite.new()   # κρατά ζωντανό το αντικείμενο όσο περιμένει
+	var r: Dictionary = await suite.run(lines)
 	for l in lines:
 		if l[1]:
 			print("  ", l[0])

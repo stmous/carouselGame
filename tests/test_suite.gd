@@ -3,11 +3,13 @@
 extends RefCounted
 
 const TEST_DIR := "res://tests/unit/"
+const ASYNC_TIMEOUT := 15.0
 
 
 ## Τρέχει όλα τα tests. Γράφει γραμμές αποτελεσμάτων στο `lines`
 ## (κάθε στοιχείο: [κείμενο, πέρασε: bool]) και επιστρέφει {total, failed, asserts}.
-static func run(lines: Array) -> Dictionary:
+## Coroutine (λόγω των ασύγχρονων tests): `var r: Dictionary = await TestSuite.new().run(lines)`.
+func run(lines: Array) -> Dictionary:
 	var files: Array = []
 	var dir := DirAccess.open(TEST_DIR)
 	if dir == null:
@@ -37,7 +39,14 @@ static func run(lines: Array) -> Dictionary:
 			t.current_test = f.get_basename() + "." + mname
 			if t.has_method("before_each"):
 				t.before_each()
-			t.call(mname)
+			if mname.begins_with("test_async_"):
+				var st := Engine.get_main_loop() as SceneTree
+				st.create_timer(ASYNC_TIMEOUT).timeout.connect(t._on_async_timeout)
+				t.call(mname)
+				if not t.is_done:
+					await t.done
+			else:
+				t.call(mname)
 			total += 1
 			asserts += t.assertions
 			if t.failures.is_empty():

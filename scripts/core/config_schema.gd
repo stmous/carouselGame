@@ -26,6 +26,11 @@ const EFFECT_PRESETS := ["minimal", "normal", "arcade"]
 const EFFECT_KEYS := ["confetti", "glow", "bounce", "screen_shake", "circle_pulse"]
 const SOUND_KEYS := ["music", "countdown", "stop", "win", "lose"]
 
+# Εξωτερικό φως (ρελέ Shelly)
+const LIGHT_AP := "ap"           # το PC/tablet συνδέεται στο Wi-Fi του Shelly
+const LIGHT_ROUTER := "router"   # Shelly και PC/tablet στο ίδιο δίκτυο (router)
+const SHELLY_AP_IP := "192.168.33.1"
+
 
 static func _demo_icon(id: String, name: String, replay: bool = false) -> Dictionary:
 	return {
@@ -36,6 +41,7 @@ static func _demo_icon(id: String, name: String, replay: bool = false) -> Dictio
 		"popup": DEMO_POPUP_DIR + "prize_" + id + ".png",
 		"sound": "",
 		"replay": replay,
+		"light": false,              # «Ανάβει το φως» (μόνο «Τροχός της τύχης»)
 	}
 
 
@@ -128,6 +134,15 @@ static func defaults() -> Dictionary:
 			"stop": {"file": "", "volume": 0.8, "enabled": true},
 			"win": {"file": "", "volume": 0.9, "enabled": true},
 			"lose": {"file": "", "volume": 0.8, "enabled": true},
+		},
+		"light": {
+			"enabled": false,
+			"connection": LIGHT_AP,      # LIGHT_AP | LIGHT_ROUTER
+			"ip": SHELLY_AP_IP,          # IP (ή IP:θύρα, π.χ. για τον mock server)
+			"output": 0,                 # Switch id (το Shelly 1 Gen3 έχει μόνο το 0)
+			"duration": 5,               # δευτερόλεπτα (toggle_after του Shelly)
+			"username": "",              # κενό ⇒ "admin" (το μόνο όνομα που δέχεται το Shelly)
+			"password": "",              # κενό ⇒ χωρίς authentication
 		},
 		"admin": {"pin": "1234"},
 		"kiosk": {"fullscreen": true, "hide_cursor": true, "keep_screen_on": true, "block_close": true},
@@ -270,13 +285,23 @@ static func sanitize(cfg: Dictionary) -> Dictionary:
 	if not ["top", "center", "bottom"].has(logo["position"]):
 		logo["position"] = "top"
 
+	var light: Dictionary = cfg["light"]
+	if light["connection"] != LIGHT_AP and light["connection"] != LIGHT_ROUTER:
+		light["connection"] = LIGHT_AP
+	light["ip"] = str(light["ip"]).strip_edges()
+	light["output"] = clampi(int(light["output"]), 0, 15)
+	light["duration"] = clampi(int(round(float(light["duration"]))), 1, 3600)
+	light["username"] = str(light["username"]).strip_edges()
+	light["password"] = str(light["password"])
+
 	# Εικονίδια: κάθε στοιχείο πρέπει να έχει όλα τα πεδία και μοναδικό id.
 	var clean: Array = []
 	var seen := {}
 	for item in cfg["icons"]["list"]:
 		if not (item is Dictionary):
 			continue
-		var icon := merge({"id": "", "name": "", "image": "", "popup": "", "sound": "", "replay": false}, item)
+		var icon := merge({"id": "", "name": "", "image": "", "popup": "", "sound": "", "replay": false,
+			"light": false}, item)
 		var id := str(icon["id"])
 		if id == "" or seen.has(id):
 			id = _unique_id(seen)

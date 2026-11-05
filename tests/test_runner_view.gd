@@ -22,8 +22,10 @@ func _ready() -> void:
 	text.add_theme_font_size_override("normal_font_size", 22)
 	add_child(text)
 
+	text.text = "Εκτέλεση tests… (τα δικτυακά tests χρειάζονται μερικά δευτερόλεπτα)"
 	var lines: Array = []
-	var r := TestSuite.run(lines)
+	var suite := TestSuite.new()   # κρατά ζωντανό το αντικείμενο όσο περιμένει
+	var r: Dictionary = await suite.run(lines)
 	var ok: bool = r["failed"] == 0
 	var head := "[b][color=%s]%s[/color][/b]\nTests: %d   αποτυχίες: %d   assertions: %d\n\n" % [
 		"#6fe07a" if ok else "#ff6b6b",
