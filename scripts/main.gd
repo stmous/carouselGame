@@ -80,7 +80,8 @@ func _ready() -> void:
 	attract.add_child(attract_label)
 
 	debug_label = _make_label()
-	debug_label.visible = OS.is_debug_build()
+	# Γραμμή κατάστασης και πλήκτρα F2–F11 μόνο μέσα από τον editor, ποτέ στο .exe/.apk.
+	debug_label.visible = Kiosk.in_editor()
 	add_child(debug_label)
 
 	game = Game.new()
@@ -281,7 +282,7 @@ func _input(event: InputEvent) -> void:
 		return
 	if screen == Screen.ADMIN or screen == Screen.PIN:
 		return
-	if OS.is_debug_build() and _debug_keys(event):
+	if Kiosk.in_editor() and _debug_keys(event):
 		return
 
 
