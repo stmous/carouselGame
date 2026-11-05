@@ -17,6 +17,7 @@ const Fonts = preload("res://scripts/util/fonts.gd")
 const StatsCore = preload("res://scripts/core/stats_core.gd")
 const Profiles = preload("res://scripts/util/profiles.gd")
 const Exports = preload("res://scripts/util/exports.gd")
+const ShellyRpc = preload("res://scripts/core/shelly_rpc.gd")
 
 signal closed(saved: bool)
 signal test_requested(draft: Dictionary)
@@ -28,6 +29,7 @@ const SECTIONS := [
 	["speed", "Ταχύτητα & ευκαιρίες"],
 	["effects", "Εφέ"],
 	["sounds", "Ήχοι"],
+	["light", "Εξωτερικό φως"],
 	["flow", "Οθόνη έλξης & ροή"],
 	["stats", "Στατιστικά"],
 	["profiles", "Προφίλ θεμάτων"],
@@ -42,6 +44,7 @@ const SOUND_NAMES := {
 	"lose": "Αποτυχία",
 }
 const ORDINALS := ["1η", "2η", "3η", "4η", "5η"]
+const LIGHT_POLL_SECONDS := 3.0
 
 var draft: Dictionary = {}
 var dirty := false
@@ -56,6 +59,9 @@ var _dirty_label: Label
 var _rebuild_pending := false
 var _stats_day := ""               # φίλτρο στατιστικών ("" = όλες οι ημέρες)
 var _stats_mode := ""              # φίλτρο στατιστικών ("" = όλες οι λειτουργίες)
+var _light_timer: Timer            # έλεγχος κατάστασης Shelly, μόνο με ανοιχτή την ενότητα
+var _light_status: Label
+var _light_status_pending := false
 
 
 func _ready() -> void:
@@ -70,6 +76,11 @@ func _ready() -> void:
 
 	_picker = FilePicker.new()
 	add_child(_picker)
+
+	_light_timer = Timer.new()
+	_light_timer.wait_time = LIGHT_POLL_SECONDS
+	_light_timer.timeout.connect(_poll_light_status)
+	add_child(_light_timer)
 
 	var margin := MarginContainer.new()
 	margin.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
@@ -205,6 +216,7 @@ func _on_close() -> void:
 
 
 func _finish(saved: bool) -> void:
+	_light_timer.stop()
 	Sfx.clear_preview()
 	draft = {}
 	dirty = false
@@ -444,6 +456,8 @@ func _sec(v: float) -> String:
 
 func _show_section(id: String, keep_scroll: bool = false) -> void:
 	_section = id
+	_light_timer.stop()
+	_light_status = null
 	if _nav.has(id):
 		(_nav[id] as Button).button_pressed = true
 	var scroll_pos := _scroll.scroll_vertical
@@ -463,6 +477,8 @@ func _show_section(id: String, keep_scroll: bool = false) -> void:
 			_build_effects()
 		"sounds":
 			_build_sounds()
+		"light":
+			_build_light()
 		"flow":
 			_build_flow()
 		"stats":
@@ -670,6 +686,7 @@ func _icon_row(i: int, count: int, is_oc: bool) -> Control:
 		v.add_child(UI.label("Δικός του ήχος (προαιρετικό — αλλιώς ο ήχος νίκης)"))
 		v.add_child(_file(p + ["sound"], "sound"))
 		v.add_child(UI.row("«Ξαναπαίξε»", _toggle(p + ["replay"])))
+		v.add_child(UI.row("Ανάβει το φως", _toggle(p + ["light"])))
 	return card
 
 
@@ -1170,3 +1187,117 @@ func _build_kiosk() -> void:
 
 func _quit_app() -> void:
 	get_tree().quit()
+
+
+# ---------------------------------------------------------- εξωτερικό φως ---
+
+func _build_light() -> void:
+	var lp := ["light"]
+	var enabled := bool(_v(lp + ["enabled"], false))
+	var b := _add_card("Εξωτερικό φως",
+		"Στη νίκη ανάβει ασύρματα ένα φως μέσω ρελέ Shelly (π.χ. Shelly 1 Gen3 με ταινία LED 12V). "
+		+ "Η επικοινωνία γίνεται στο τοπικό δίκτυο, χωρίς cloud και χωρίς internet. "
+		+ "Οδηγίες σύνδεσης και καλωδίωσης υπάρχουν στο README.")
+	b.add_child(UI.row("Ενεργό", _toggle(lp + ["enabled"], true)))
+	if draft["mode"] == ConfigSchema.MODE_ONE_CORRECT:
+		b.add_child(UI.help("«Ένα σωστό»: το φως ανάβει σε κάθε νίκη, μαζί με το popup νίκης."))
+	else:
+		b.add_child(UI.help("«Τροχός της τύχης»: το φως ανάβει μόνο για τα εικονίδια με «Ανάβει το φως» "
+			+ "(Εικονίδια → ρυθμίσεις κάθε εικονιδίου)."))
+
+	b = _add_card("Σύνδεση")
+	b.add_child(UI.row("Τρόπος σύνδεσης", _segmented(lp + ["connection"],
+		[[ConfigSchema.LIGHT_AP, "Wi-Fi του Shelly (Access Point)"], [ConfigSchema.LIGHT_ROUTER, "Μέσω router"]],
+		true, _set_light_connection)))
+	if _v(lp + ["connection"]) == ConfigSchema.LIGHT_AP:
+		b.add_child(UI.help("Το PC/tablet συνδέεται απευθείας στο Wi-Fi του Shelly (π.χ. «Shelly1G3-…»). "
+			+ "Η διεύθυνση του Shelly σε αυτό το δίκτυο είναι συνήθως 192.168.33.1."))
+	else:
+		b.add_child(UI.help("Shelly και PC/tablet είναι συνδεδεμένα στο ίδιο router. Γράψε τη στατική IP "
+			+ "που έχεις ορίσει στο Shelly (π.χ. 192.168.1.50)."))
+	var ip := _text(lp + ["ip"], ConfigSchema.SHELLY_AP_IP)
+	b.add_child(UI.row("Διεύθυνση IP", ip))
+	b.add_child(UI.row("Αριθμός εξόδου", _segmented(lp + ["output"], [[0, "0"], [1, "1"], [2, "2"], [3, "3"]])))
+	b.add_child(UI.help("Το Shelly 1 Gen3 έχει μία έξοδο: 0."))
+	b.add_child(UI.row("Διάρκεια ανάμματος", _slider(lp + ["duration"], 1, 120, 1, func(x): return "%d δ" % int(x))))
+	b.add_child(UI.help("Το σβήσιμο το κάνει ο χρονοδιακόπτης του ίδιου του Shelly, οπότε το φως σβήνει "
+		+ "σωστά ακόμα κι αν χαθεί η σύνδεση."))
+
+	b = _add_card("Κωδικός (προαιρετικό)",
+		"Συμπλήρωσε μόνο αν έχεις βάλει κωδικό στο Shelly (Settings → Authentication). "
+		+ "Το όνομα χρήστη στο Shelly είναι πάντα «admin».")
+	b.add_child(UI.row("Όνομα χρήστη", _text(lp + ["username"], "admin")))
+	var pw := _text(lp + ["password"], "χωρίς κωδικό")
+	pw.secret = true
+	b.add_child(UI.row("Κωδικός", pw))
+
+	b = _add_card("Κατάσταση & δοκιμή")
+	_light_status = UI.label("")
+	_light_status.add_theme_font_size_override("font_size", 28)
+	b.add_child(UI.row("Κατάσταση", _light_status))
+	var test := UI.button("Δοκιμή φωτός", "AccentButton")
+	test.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
+	test.disabled = not enabled
+	test.pressed.connect(_on_light_test)
+	b.add_child(test)
+	b.add_child(UI.help("Ο έλεγχος σύνδεσης γίνεται κάθε %d δευτερόλεπτα όσο είναι ανοιχτή αυτή η ενότητα, "
+		% int(LIGHT_POLL_SECONDS) + "με τις ρυθμίσεις που βλέπεις (και πριν την αποθήκευση)."))
+
+	if enabled:
+		_set_light_status("Έλεγχος…", UI.MUTED)
+		_poll_light_status()
+		_light_timer.start()
+	else:
+		_set_light_status("Ανενεργό", UI.MUTED)
+
+
+## Στον τρόπο «Access Point» η IP συμπληρώνεται με την προεπιλογή του Shelly.
+func _set_light_connection(value) -> void:
+	draft["light"]["connection"] = str(value)
+	if str(value) == ConfigSchema.LIGHT_AP:
+		draft["light"]["ip"] = ConfigSchema.SHELLY_AP_IP
+	_changed(true)
+
+
+func _set_light_status(text: String, color: Color) -> void:
+	if _light_status != null and is_instance_valid(_light_status):
+		_light_status.text = text
+		_light_status.add_theme_color_override("font_color", color)
+
+
+func _poll_light_status() -> void:
+	if not visible or _section != "light" or draft.is_empty() or not bool(draft["light"]["enabled"]):
+		_light_timer.stop()
+		return
+	if _light_status_pending:
+		return
+	_light_status_pending = true
+	Light.check_status(draft["light"].duplicate(), _on_light_status)
+
+
+func _on_light_status(ok: bool, code: int, body: String) -> void:
+	_light_status_pending = false
+	if _section != "light":
+		return
+	if ok and ShellyRpc.is_status_ok(code, body):
+		_set_light_status("● Συνδεδεμένο", UI.SUCCESS)
+	elif code == 401:
+		_set_light_status("● Ζητά κωδικό (ή λάθος κωδικός)", UI.ACCENT)
+	elif ShellyRpc.normalize_host(str(draft.get("light", {}).get("ip", ""))) == "":
+		_set_light_status("● Μη έγκυρη διεύθυνση IP", UI.DANGER)
+	else:
+		_set_light_status("● Δεν απαντά", UI.DANGER)
+
+
+func _on_light_test() -> void:
+	UI.toast(self, "Στάλθηκε εντολή ανάμματος για %d δ…" % int(draft["light"]["duration"]), UI.MUTED)
+	Light.turn_on(draft["light"].duplicate(), _on_light_test_done)
+
+
+func _on_light_test_done(ok: bool, code: int, _body: String) -> void:
+	if ok:
+		UI.toast(self, "Το Shelly δέχτηκε την εντολή: το φως πρέπει να ανάψει.")
+	elif code == 401:
+		UI.toast(self, "Το Shelly ζητά κωδικό: έλεγξε τον κωδικό.", UI.DANGER)
+	else:
+		UI.toast(self, "Το Shelly δεν απάντησε. Έλεγξε Wi-Fi και διεύθυνση IP.", UI.DANGER)

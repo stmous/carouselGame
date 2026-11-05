@@ -299,6 +299,8 @@ func _show_result() -> void:
 		else:
 			Sfx.play("win")
 		_celebrate()
+	# Εξωτερικό φως (αν είναι ενεργό): ασύγχρονα, ταυτόχρονα με το popup.
+	Light.on_result(_pending_outcome, _pending_icon)
 	result_shown.emit(_pending_outcome, _pending_icon)
 
 

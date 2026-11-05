@@ -16,7 +16,7 @@ compatibility/default_parent_skeleton_in_mesh_instance_3d=true
 
 config/name="Σταμάτα στο σωστό"
 config/description="Παιχνίδι δεξιότητας για περίπτερα εκδηλώσεων."
-config/version="1.0.1"
+config/version="1.1.0"
 run/main_scene="res://scenes/main.tscn"
 config/use_custom_user_dir=true
 config/custom_user_dir_name="StamataStoSosto"
@@ -30,6 +30,7 @@ config/icon="res://assets/icon/icon_1024.png"
 Config="*res://scripts/autoload/config.gd"
 Sfx="*res://scripts/autoload/sfx.gd"
 Stats="*res://scripts/autoload/stats.gd"
+Light="*res://scripts/autoload/light.gd"
 
 [display]
 
