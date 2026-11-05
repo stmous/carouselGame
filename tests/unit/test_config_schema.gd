@@ -98,3 +98,41 @@ func test_migrate_from_unversioned() -> void:
 	var c := ConfigSchema.from_user_data({"mode": "wheel"})
 	assert_eq(c["schema_version"], ConfigSchema.SCHEMA_VERSION)
 	assert_eq(c["mode"], "wheel")
+
+
+func test_migrate_v1_fills_demo_logo() -> void:
+	var v1 := {"schema_version": 1, "theme": {"logo": {"image": "", "size_pct": 30.0}}}
+	var c := ConfigSchema.from_user_data(v1)
+	assert_eq(c["schema_version"], 2)
+	assert_eq(c["theme"]["logo"]["image"], ConfigSchema.DEMO_LOGO)
+	assert_near(c["theme"]["logo"]["size_pct"], 30.0, 1e-9, "οι υπόλοιπες ρυθμίσεις μένουν")
+
+
+func test_migrate_v2_keeps_user_logo_choice() -> void:
+	# Σε v2 το κενό λογότυπο είναι συνειδητή επιλογή του διαχειριστή.
+	var v2 := {"schema_version": 2, "theme": {"logo": {"image": ""}}}
+	assert_eq(ConfigSchema.from_user_data(v2)["theme"]["logo"]["image"], "")
+
+
+func test_effect_presets() -> void:
+	var m := ConfigSchema.effect_preset("minimal")
+	var a := ConfigSchema.effect_preset("arcade")
+	for key in ConfigSchema.EFFECT_KEYS:
+		assert_true(m.has(key) and a.has(key), key)
+	assert_false(m["confetti"])
+	assert_true(a["screen_shake"])
+	assert_eq(ConfigSchema.effect_preset("???")["preset"], "normal")
+	assert_true(ConfigSchema.effect_intensity("arcade") > ConfigSchema.effect_intensity("minimal"))
+
+
+func test_sanitize_flow_and_audio() -> void:
+	var c := ConfigSchema.defaults()
+	c["flow"]["idle_timeout"] = -5
+	c["audio"]["win"]["volume"] = 7.0
+	c["effects"]["preset"] = "loud"
+	c["theme"]["logo"]["position"] = "left"
+	c = ConfigSchema.sanitize(c)
+	assert_near(c["flow"]["idle_timeout"], 0.0)
+	assert_near(c["audio"]["win"]["volume"], 1.0)
+	assert_eq(c["effects"]["preset"], "normal")
+	assert_eq(c["theme"]["logo"]["position"], "top")

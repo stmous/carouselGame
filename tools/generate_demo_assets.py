@@ -190,6 +190,31 @@ def make_popup(title, subtitle, top, bottom, icon_img=None, seed=0, with_confett
     return img
 
 
+def make_logo():
+    """Λογότυπο demo: τίτλος σε «κονκάρδα» με τον κύκλο-στόχο και ένα αστέρι."""
+    w, h = 1400, 420
+    img = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+    card = rounded_card((w - 40, h - 40), 90, (255, 214, 64), (245, 120, 30))
+    sh = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+    ImageDraw.Draw(sh).rounded_rectangle([30, 40, w - 10, h - 4], radius=90, fill=(0, 0, 0, 120))
+    img.alpha_composite(sh.filter(ImageFilter.GaussianBlur(14)))
+    img.alpha_composite(card, (20, 12))
+    d = ImageDraw.Draw(img)
+    # κύκλος-στόχος με αστέρι
+    cx, cy, r = 215, 202, 125
+    ring = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+    ImageDraw.Draw(ring).ellipse([cx - r, cy - r, cx + r, cy + r], fill=(255, 255, 255, 60),
+                                 outline=(255, 255, 255, 255), width=14)
+    img.alpha_composite(ring)
+    d.polygon(star_points(cx, cy + 6, 82, 35), fill=(255, 255, 255, 255))
+    font = ImageFont.truetype(FONT_BOLD, 112)
+    for i, line in enumerate(["Σταμάτα", "στο σωστό!"]):
+        x, y = 395, 62 + i * 140
+        d.text((x + 5, y + 7), line, font=font, fill=(120, 50, 0, 110))
+        d.text((x, y), line, font=font, fill=(255, 255, 255, 255))
+    return img
+
+
 def main():
     os.makedirs(ICON_DIR, exist_ok=True)
     os.makedirs(POPUP_DIR, exist_ok=True)
@@ -212,6 +237,7 @@ def main():
         make_popup(title, sub, lerp(top, (255, 255, 255), 0.1), lerp(bottom, (0, 0, 0), 0.25),
                    icon_img=img, seed=10 + i).save(os.path.join(POPUP_DIR, "prize_" + icon_id + ".png"),
                                                     optimize=True)
+    make_logo().save(os.path.join(ROOT, "assets", "demo", "logo.png"), optimize=True)
     print("OK:", ICON_DIR, POPUP_DIR)
 
 

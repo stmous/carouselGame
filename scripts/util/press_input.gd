@@ -8,10 +8,19 @@ extends RefCounted
 const DEBOUNCE_MS := 150
 
 static var _last_press_ms := -100000
+## Τελευταία αλληλεπίδραση (για idle timeout). Ενημερώνεται και από πατήματα
+## που «καταναλώνει» κάποια άλλη οθόνη (π.χ. το popup).
+static var last_activity_ms := 0
+
+
+static func mark_activity() -> void:
+	last_activity_ms = Time.get_ticks_msec()
 
 
 ## True αν το event είναι πάτημα (χωρίς έλεγχο debounce).
 static func is_press(event: InputEvent) -> bool:
+	if is_activity(event):
+		mark_activity()
 	if event is InputEventKey:
 		var k := event as InputEventKey
 		return k.pressed and not k.echo \

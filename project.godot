@@ -16,6 +16,7 @@ boot_splash/show_image=false
 [autoload]
 
 Config="*res://scripts/autoload/config.gd"
+Sfx="*res://scripts/autoload/sfx.gd"
 
 [display]
 

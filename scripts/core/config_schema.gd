@@ -8,7 +8,7 @@
 ## Pure λογική, χωρίς εξάρτηση από σκηνές, ώστε να ελέγχεται με unit tests.
 extends RefCounted
 
-const SCHEMA_VERSION := 1
+const SCHEMA_VERSION := 2
 
 const MODE_ONE_CORRECT := "one_correct"
 const MODE_WHEEL := "wheel"
@@ -20,6 +20,11 @@ const MAX_SPEED := 3.0
 
 const DEMO_ICON_DIR := "res://assets/demo/icons/"
 const DEMO_POPUP_DIR := "res://assets/demo/popups/"
+const DEMO_LOGO := "res://assets/demo/logo.png"
+
+const EFFECT_PRESETS := ["minimal", "normal", "arcade"]
+const EFFECT_KEYS := ["confetti", "glow", "bounce", "screen_shake", "circle_pulse"]
+const SOUND_KEYS := ["music", "countdown", "stop", "win", "lose"]
 
 
 static func _demo_icon(id: String, name: String, replay: bool = false) -> Dictionary:
@@ -49,7 +54,7 @@ static func defaults() -> Dictionary:
 				"image": "",
 				"image_fit": "cover",        # "cover" | "contain"
 			},
-			"logo": {"image": "", "size_pct": 25.0, "position": "top"},
+			"logo": {"image": DEMO_LOGO, "size_pct": 24.0, "position": "top"},  # top | center | bottom
 			"circle": {
 				"color": "#ffffff",
 				"thickness": 10.0,           # px σε ύψος αναφοράς 1080
@@ -108,22 +113,17 @@ static func defaults() -> Dictionary:
 		},
 		"flow": {
 			"attract_text": "Πάτα για να παίξεις",
+			"attract_icons": true,           # εικονίδια που περνούν αργά στο φόντο
 			"countdown": true,
 			"idle_timeout": 45.0,
 			"popup_auto_close": 6.0,
 			"retry_banner_duration": 1.6,
 		},
-		"effects": {
-			"preset": "normal",              # "minimal" | "normal" | "arcade"
-			"confetti": true,
-			"glow": true,
-			"bounce": true,
-			"screen_shake": false,
-			"circle_pulse": true,
-		},
+		"effects": effect_preset("normal"),
 		"audio": {
 			"master_mute": false,
-			"music": {"file": "", "volume": 0.6, "enabled": true},
+			# file "" = ενσωματωμένος προεπιλεγμένος ήχος
+			"music": {"file": "", "volume": 0.4, "enabled": true},
 			"countdown": {"file": "", "volume": 0.8, "enabled": true},
 			"stop": {"file": "", "volume": 0.8, "enabled": true},
 			"win": {"file": "", "volume": 0.9, "enabled": true},
@@ -132,6 +132,30 @@ static func defaults() -> Dictionary:
 		"admin": {"pin": "1234"},
 		"kiosk": {"fullscreen": true, "hide_cursor": true, "keep_screen_on": true},
 	}
+
+
+## Ρυθμίσεις εφέ για ένα προκαθορισμένο επίπεδο. Μετά την επιλογή επιπέδου ο
+## διαχειριστής μπορεί να αλλάξει μεμονωμένους διακόπτες.
+static func effect_preset(preset: String) -> Dictionary:
+	match preset:
+		"minimal":
+			return {"preset": "minimal", "confetti": false, "glow": false, "bounce": false,
+				"screen_shake": false, "circle_pulse": false}
+		"arcade":
+			return {"preset": "arcade", "confetti": true, "glow": true, "bounce": true,
+				"screen_shake": true, "circle_pulse": true}
+	return {"preset": "normal", "confetti": true, "glow": true, "bounce": true,
+		"screen_shake": false, "circle_pulse": true}
+
+
+## Πόσο «έντονα» είναι τα εφέ (πολλαπλασιαστής για glow, confetti, κ.λπ.).
+static func effect_intensity(preset: String) -> float:
+	match preset:
+		"minimal":
+			return 0.6
+		"arcade":
+			return 1.6
+	return 1.0
 
 
 ## Συγχωνεύει αναδρομικά το `loaded` πάνω στο `base`.
@@ -174,6 +198,17 @@ static func migrate(data: Dictionary) -> Dictionary:
 		# Έκδοση 0 = αρχεία χωρίς αριθμό έκδοσης. Δεν υπάρχει τίποτα να
 		# μετονομαστεί ακόμα· απλώς σημειώνουμε την έκδοση.
 		version = 1
+	if version < 2:
+		# v2 (Φάση 2): το demo θέμα απέκτησε λογότυπο. Αρχεία v1 είχαν κενό
+		# λογότυπο ως προεπιλογή ⇒ το συμπληρώνουμε.
+		var theme = out.get("theme", {})
+		if theme is Dictionary:
+			var logo = theme.get("logo", {})
+			if logo is Dictionary and str(logo.get("image", "")) == "":
+				logo["image"] = DEMO_LOGO
+				theme["logo"] = logo
+				out["theme"] = theme
+		version = 2
 	out["schema_version"] = version
 	return out
 
@@ -216,6 +251,24 @@ static func sanitize(cfg: Dictionary) -> Dictionary:
 	if stop["mode"] != "instant" and stop["mode"] != "ease":
 		stop["mode"] = "ease"
 	stop["ease_duration"] = clampf(float(stop["ease_duration"]), 0.05, 3.0)
+
+	var fx: Dictionary = cfg["effects"]
+	if not EFFECT_PRESETS.has(fx["preset"]):
+		fx["preset"] = "normal"
+
+	var flow: Dictionary = cfg["flow"]
+	flow["idle_timeout"] = clampf(float(flow["idle_timeout"]), 0.0, 3600.0)       # 0 = ανενεργό
+	flow["popup_auto_close"] = clampf(float(flow["popup_auto_close"]), 0.0, 600.0)  # 0 = μόνο με πάτημα
+	flow["retry_banner_duration"] = clampf(float(flow["retry_banner_duration"]), 0.3, 10.0)
+
+	for key in SOUND_KEYS:
+		var snd: Dictionary = cfg["audio"][key]
+		snd["volume"] = clampf(float(snd["volume"]), 0.0, 1.0)
+
+	var logo: Dictionary = cfg["theme"]["logo"]
+	logo["size_pct"] = clampf(float(logo["size_pct"]), 2.0, 90.0)
+	if not ["top", "center", "bottom"].has(logo["position"]):
+		logo["position"] = "top"
 
 	# Εικονίδια: κάθε στοιχείο πρέπει να έχει όλα τα πεδία και μοναδικό id.
 	var clean: Array = []

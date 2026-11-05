@@ -155,7 +155,8 @@ func _process(delta: float) -> void:
 		return
 	if model.is_moving():
 		var before := model.popped_total
-		var just_stopped := model.update(delta)
+		# Όριο στο dt: μετά από «πάγωμα» (ελαχιστοποίηση, παύση εφαρμογής) δεν πηδάμε.
+		var just_stopped := model.update(minf(delta, 0.1))
 		if focus_slot >= 0:
 			focus_slot -= model.popped_total - before
 		queue_redraw()

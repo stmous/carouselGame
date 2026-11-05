@@ -13,16 +13,18 @@ const PressInput = preload("res://scripts/util/press_input.gd")
 const TargetCircle = preload("res://scripts/game/target_circle.gd")
 const CarouselView = preload("res://scripts/game/carousel_view.gd")
 const ResultPopup = preload("res://scripts/game/result_popup.gd")
+const Confetti = preload("res://scripts/game/confetti.gd")
 
 signal finished(record: Dictionary)
 signal stop_pressed
 signal result_shown(outcome: int, icon_id: String)
 
-enum Phase { IDLE, BANNER, RUNNING, STOPPING, RESOLVING, POPUP }
+enum Phase { IDLE, COUNTDOWN, BANNER, RUNNING, STOPPING, RESOLVING, POPUP }
 
 const SNAP_DURATION := 0.18
 const RESULT_DELAY := 0.75         # χρόνος να δει ο παίκτης πού σταμάτησε
 const MISS_COLOR := Color("#ff5a5a")
+const COUNTDOWN_STEP := 0.8        # δευτερόλεπτα ανά αριθμό
 
 var phase: int = Phase.IDLE
 var flow: GameFlow
@@ -32,6 +34,8 @@ var carousel: CarouselView
 var circle_front: TargetCircle
 var banner: Label
 var popup: ResultPopup
+var countdown_label: Label
+var confetti: Confetti
 
 var _token := 0                    # ακυρώνει εκκρεμείς callbacks μετά από abort
 var _pending_icon := ""
@@ -39,6 +43,10 @@ var _pending_outcome: int = GameFlow.Outcome.NONE
 var _hl_tween: Tween
 var _banner_tween: Tween
 var _time := 0.0
+var _shake_t := 0.0
+var _shake_dur := 0.0
+var _shake_amp := 0.0
+var _rng := RandomNumberGenerator.new()
 
 
 func _ready() -> void:
@@ -64,9 +72,20 @@ func _ready() -> void:
 	banner.visible = false
 	add_child(banner)
 
+	countdown_label = Label.new()
+	countdown_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	countdown_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	countdown_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	countdown_label.visible = false
+	add_child(countdown_label)
+
 	popup = ResultPopup.new()
 	add_child(popup)
 	popup.closed.connect(_on_popup_closed)
+
+	confetti = Confetti.new()      # πάνω από το popup
+	add_child(confetti)
+	_rng.randomize()
 
 	apply_config()
 
@@ -75,8 +94,9 @@ func _ready() -> void:
 func apply_config() -> void:
 	var cfg: Dictionary = Config.data
 	var glow_on := bool(cfg["effects"]["glow"])
-	circle_back.configure(cfg["theme"]["circle"], glow_on)
-	circle_front.configure(cfg["theme"]["circle"], glow_on)
+	var boost := ConfigSchema.effect_intensity(str(cfg["effects"]["preset"]))
+	circle_back.configure(cfg["theme"]["circle"], glow_on, boost)
+	circle_front.configure(cfg["theme"]["circle"], glow_on, boost)
 	carousel.configure(cfg["icons"]["list"], cfg["icons"], cfg["theme"]["strip"])
 	_layout_banner()
 
@@ -96,6 +116,14 @@ func _layout_banner() -> void:
 	banner.size = Vector2(s.x, fs * 1.6)
 	banner.position = Vector2(0, s.y * 0.12)
 	banner.pivot_offset = banner.size * 0.5
+	var cs := int(s.y * 0.26)
+	countdown_label.add_theme_font_size_override("font_size", cs)
+	countdown_label.add_theme_constant_override("outline_size", maxi(6, int(cs / 10.0)))
+	countdown_label.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.75))
+	countdown_label.add_theme_color_override("font_color", _color("text_color", Color.WHITE))
+	countdown_label.size = Vector2(s.x, cs * 1.4)
+	countdown_label.position = Vector2(0, s.y * 0.5 - cs * 0.7)
+	countdown_label.pivot_offset = countdown_label.size * 0.5
 
 
 func _color(key: String, fallback: Color) -> Color:
@@ -114,7 +142,10 @@ func start_game(test_game: bool = false) -> void:
 		_show_popup(null, "Δεν έχουν οριστεί εικονίδια.\nΆνοιξε τις ρυθμίσεις.", null)
 		_pending_outcome = GameFlow.Outcome.LOSE
 		return
-	_begin_attempt()
+	if bool(Config.data["flow"]["countdown"]):
+		_countdown_step(3)
+	else:
+		_begin_attempt()
 
 
 ## Διακόπτει ό,τι τρέχει (idle timeout, είσοδος στο admin κ.λπ.).
@@ -127,7 +158,46 @@ func abort() -> void:
 		popup.visible = false
 	if banner != null:
 		banner.visible = false
+	if countdown_label != null:
+		countdown_label.visible = false
+	if confetti != null:
+		confetti.clear()
+	_shake_t = 0.0
+	position = Vector2.ZERO
 	_set_highlight(0.0, 0.0)
+
+
+# ------------------------------------------------------ αντίστροφη μέτρηση ---
+
+func _countdown_step(n: int) -> void:
+	phase = Phase.COUNTDOWN
+	if n <= 0:
+		_pop_countdown("Πάμε!")
+		Sfx.play("countdown", 1.5)
+		_after(0.5, _end_countdown)
+		return
+	_pop_countdown(str(n))
+	Sfx.play("countdown")
+	_after(COUNTDOWN_STEP, _countdown_step.bind(n - 1))
+
+
+func _pop_countdown(text: String) -> void:
+	_layout_banner()
+	countdown_label.text = text
+	countdown_label.visible = true
+	countdown_label.modulate.a = 0.0
+	countdown_label.scale = Vector2(1.7, 1.7)
+	var tw := create_tween().set_parallel(true)
+	tw.tween_property(countdown_label, "modulate:a", 1.0, 0.15)
+	var bounce := _fx_bounce()
+	tw.tween_property(countdown_label, "scale", Vector2.ONE, 0.4) \
+		.set_trans(Tween.TRANS_BACK if bounce else Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
+	tw.chain().tween_property(countdown_label, "modulate:a", 0.0, 0.2).set_delay(COUNTDOWN_STEP - 0.6)
+
+
+func _end_countdown() -> void:
+	countdown_label.visible = false
+	_begin_attempt()
 
 
 func _begin_attempt() -> void:
@@ -171,6 +241,7 @@ func _stop() -> void:
 	if not carousel.request_stop(ease_time):
 		return
 	phase = Phase.STOPPING
+	Sfx.play("stop")
 	stop_pressed.emit()
 	if ease_time <= 0.0:
 		_resolve()
@@ -208,14 +279,24 @@ func _show_result() -> void:
 		var target := ConfigSchema.find_icon(Config.data, _pending_icon)
 		_show_popup(AssetLoader.texture(str(mode_cfg["win_popup"])), "Συγχαρητήρια!\nΚέρδισες!",
 			_icon_texture(target))
+		Sfx.play("win")
+		_celebrate()
 	elif o == GameFlow.Outcome.RETRY or o == GameFlow.Outcome.LOSE:
 		_show_popup(AssetLoader.texture(str(mode_cfg["lose_popup"])), "Δεν πέτυχε!", null)
+		Sfx.play("lose")
 	elif o == GameFlow.Outcome.WHEEL or o == GameFlow.Outcome.WHEEL_REPLAY:
 		var icon := ConfigSchema.find_icon(Config.data, _pending_icon)
 		var text := str(icon.get("name", ""))
 		if o == GameFlow.Outcome.WHEEL_REPLAY:
 			text += "\nΞαναπαίξε!"
 		_show_popup(AssetLoader.texture(str(icon.get("popup", ""))), text, _icon_texture(icon))
+		# Ήχος του εικονιδίου αν έχει οριστεί, αλλιώς ο ήχος νίκης.
+		var icon_sound := str(icon.get("sound", ""))
+		if icon_sound != "":
+			Sfx.play_file(icon_sound, float(Config.data["audio"]["win"]["volume"]))
+		else:
+			Sfx.play("win")
+		_celebrate()
 	result_shown.emit(_pending_outcome, _pending_icon)
 
 
@@ -255,6 +336,24 @@ func _circle_highlight_color() -> Color:
 func _fx_bounce() -> bool:
 	var fx: Dictionary = Config.data["effects"]
 	return bool(fx["bounce"]) and fx["preset"] != "minimal"
+
+
+## Εφέ νίκης: confetti και (αν είναι ενεργό) screen shake.
+func _celebrate() -> void:
+	var fx: Dictionary = Config.data["effects"]
+	var k := ConfigSchema.effect_intensity(str(fx["preset"]))
+	if bool(fx["confetti"]):
+		confetti.burst(size * 0.5, int(90 * k), 0.8 + 0.2 * k)
+		if fx["preset"] == "arcade":
+			confetti.cannons(70)
+	if bool(fx["screen_shake"]):
+		_shake(size.y * 0.012 * k, 0.5)
+
+
+func _shake(amplitude: float, duration: float) -> void:
+	_shake_amp = amplitude
+	_shake_dur = duration
+	_shake_t = duration
 
 
 func _show_banner(text: String) -> void:
@@ -303,3 +402,10 @@ func _process(delta: float) -> void:
 	if circle_front.pulse != p:
 		circle_front.pulse = p
 		circle_back.pulse = p
+	# Screen shake με φθίνουσα ένταση.
+	if _shake_t > 0.0:
+		_shake_t = maxf(_shake_t - delta, 0.0)
+		var a := _shake_amp * (_shake_t / _shake_dur)
+		position = Vector2(_rng.randf_range(-a, a), _rng.randf_range(-a, a))
+	elif position != Vector2.ZERO:
+		position = Vector2.ZERO

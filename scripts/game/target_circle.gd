@@ -13,6 +13,7 @@ const REF_HEIGHT := 1080.0
 var layer: int = Layer.FRONT
 var cfg: Dictionary = {}          # theme.circle
 var glow_enabled := true          # effects.glow
+var glow_boost := 1.0             # ένταση ανά επίπεδο εφέ (Μίνιμαλ < Κανονικό < Arcade)
 ## 0..1: έμφαση μετά το σταμάτημα (χρώμα highlight, πιο έντονο glow).
 var highlight := 0.0:
 	set(v):
@@ -32,9 +33,10 @@ func _ready() -> void:
 	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 
 
-func configure(circle_cfg: Dictionary, glow_on: bool) -> void:
+func configure(circle_cfg: Dictionary, glow_on: bool, boost: float = 1.0) -> void:
 	cfg = circle_cfg
 	glow_enabled = glow_on
+	glow_boost = boost
 	highlight_color = Color.from_string(str(cfg.get("highlight_color", "#ffe14d")), Color.YELLOW)
 	queue_redraw()
 
@@ -72,10 +74,10 @@ func _draw() -> void:
 	var glow_on := glow_enabled and bool(cfg["glow"])
 	if glow_on or highlight > 0.0:
 		var gcol := Color.from_string(str(cfg["glow_color"]), Color.WHITE).lerp(highlight_color, highlight)
-		var intensity := clampf(float(cfg["glow_intensity"]), 0.0, 1.0)
+		var intensity := clampf(float(cfg["glow_intensity"]), 0.0, 1.0) * glow_boost
 		if not glow_on:
 			intensity = 0.0
-		intensity = clampf(intensity + 0.6 * highlight, 0.0, 1.5)
+		intensity = clampf(intensity + 0.6 * highlight * glow_boost, 0.0, 2.2)
 		var steps := 8
 		for i in range(steps, 0, -1):
 			var t := float(i) / steps
