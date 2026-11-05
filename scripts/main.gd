@@ -24,7 +24,7 @@ var _input_block_until := 0
 
 
 func _ready() -> void:
-	set_anchors_preset(Control.PRESET_FULL_RECT)
+	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
 
 	backdrop = Backdrop.new()
@@ -36,7 +36,7 @@ func _ready() -> void:
 	game.finished.connect(_on_game_finished)
 
 	attract = Control.new()
-	attract.set_anchors_preset(Control.PRESET_FULL_RECT)
+	attract.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	attract.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(attract)
 
@@ -80,7 +80,7 @@ func _layout() -> void:
 	var text_col := Color.from_string(str(Config.data["theme"]["text_color"]), Color.WHITE)
 	var fs := int(s.y * 0.09)
 	attract_label.add_theme_font_size_override("font_size", fs)
-	attract_label.add_theme_constant_override("outline_size", maxi(4, fs / 8))
+	attract_label.add_theme_constant_override("outline_size", maxi(4, int(fs / 8.0)))
 	attract_label.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.6))
 	attract_label.add_theme_color_override("font_color", text_col)
 	attract_label.size = Vector2(s.x * 0.9, fs * 2.6)

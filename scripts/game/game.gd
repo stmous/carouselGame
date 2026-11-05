@@ -42,7 +42,7 @@ var _time := 0.0
 
 
 func _ready() -> void:
-	set_anchors_preset(Control.PRESET_FULL_RECT)
+	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
 
 	circle_back = TargetCircle.new()
@@ -90,7 +90,7 @@ func _layout_banner() -> void:
 	var s := size
 	var fs := int(s.y * 0.10)
 	banner.add_theme_font_size_override("font_size", fs)
-	banner.add_theme_constant_override("outline_size", maxi(4, fs / 7))
+	banner.add_theme_constant_override("outline_size", maxi(4, int(fs / 7.0)))
 	banner.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.75))
 	banner.add_theme_color_override("font_color", _color("accent_color", Color.YELLOW))
 	banner.size = Vector2(s.x, fs * 1.6)

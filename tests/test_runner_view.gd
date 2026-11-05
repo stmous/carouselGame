@@ -8,11 +8,11 @@ const TestSuite = preload("res://tests/test_suite.gd")
 func _ready() -> void:
 	var bg := ColorRect.new()
 	bg.color = Color(0.08, 0.09, 0.12)
-	bg.set_anchors_preset(Control.PRESET_FULL_RECT)
+	bg.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	add_child(bg)
 
 	var text := RichTextLabel.new()
-	text.set_anchors_preset(Control.PRESET_FULL_RECT)
+	text.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	text.offset_left = 24
 	text.offset_top = 24
 	text.offset_right = -24

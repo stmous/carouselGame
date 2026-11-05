@@ -17,17 +17,17 @@ var _last := -1
 var _rng := RandomNumberGenerator.new()
 
 
-func _init(count: int = 0, seed_value: int = -1) -> void:
+func _init(icon_count: int = 0, seed_value: int = -1) -> void:
 	if seed_value >= 0:
 		_rng.seed = seed_value
 	else:
 		_rng.randomize()
-	reset(count)
+	reset(icon_count)
 
 
 ## Ξεκινά από την αρχή με νέο πλήθος εικονιδίων.
-func reset(count: int) -> void:
-	_count = maxi(count, 0)
+func reset(icon_count: int) -> void:
+	_count = maxi(icon_count, 0)
 	_bag.clear()
 	_last = -1
 
