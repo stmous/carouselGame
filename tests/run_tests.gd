@@ -1,54 +1,22 @@
-## Εκτελεί όλα τα unit tests στο tests/unit/.
+## Εκτελεί όλα τα unit tests από τη γραμμή εντολών:
 ##
 ##   godot --headless --path . -s res://tests/run_tests.gd
 ##
 ## Exit code 0 = όλα πέρασαν, 1 = υπάρχουν αποτυχίες.
+## (Μέσα στον editor: άνοιξε το tests/run_tests.tscn και πάτα F6.)
 extends SceneTree
 
-const TEST_DIR := "res://tests/unit/"
+const TestSuite = preload("res://tests/test_suite.gd")
 
 
 func _initialize() -> void:
-	var files: Array = []
-	var dir := DirAccess.open(TEST_DIR)
-	if dir == null:
-		printerr("Δεν βρέθηκε ο φάκελος ", TEST_DIR)
-		quit(1)
-		return
-	for f in dir.get_files():
-		# Σε export τα .gd μπορεί να εμφανίζονται ως .gd.remap / .gdc.
-		var name := f.trim_suffix(".remap")
-		if name.begins_with("test_") and name.ends_with(".gd"):
-			files.append(name)
-	files.sort()
-
-	var total := 0
-	var failed := 0
-	var asserts := 0
-	for f in files:
-		var script: GDScript = load(TEST_DIR + f)
-		if script == null:
-			printerr("✗ Δεν φορτώθηκε: ", f)
-			failed += 1
-			continue
-		for m in script.get_script_method_list():
-			var mname: String = m["name"]
-			if not mname.begins_with("test_"):
-				continue
-			var t = script.new()
-			t.current_test = f.get_basename() + "." + mname
-			if t.has_method("before_each"):
-				t.before_each()
-			t.call(mname)
-			total += 1
-			asserts += t.assertions
-			if t.failures.is_empty():
-				print("  ✓ ", t.current_test)
-			else:
-				failed += 1
-				for msg in t.failures:
-					printerr("  ✗ ", msg)
-
+	var lines: Array = []
+	var r := TestSuite.run(lines)
+	for l in lines:
+		if l[1]:
+			print("  ", l[0])
+		else:
+			printerr("  ", l[0])
 	print("")
-	print("Tests: %d, αποτυχίες: %d, assertions: %d" % [total, failed, asserts])
-	quit(1 if failed > 0 else 0)
+	print("Tests: %d, αποτυχίες: %d, assertions: %d" % [r["total"], r["failed"], r["asserts"]])
+	quit(1 if r["failed"] > 0 else 0)
